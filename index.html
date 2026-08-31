@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Помощник нефтяник РФ</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col justify-between selection:bg-zinc-800">
+
+    <header class="w-full border-b border-zinc-800/60 py-4 px-6 flex items-center justify-between bg-zinc-900/40 backdrop-blur-md sticky top-0 z-10">
+        <div class="flex items-center gap-3">
+            <div class="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300">
+                <svg class="w-5 h-5 fill-current" viewBox="0 0 24 24">
+                    <path d="M2 20h20v2H2v-2zm3-3l3-6 2 1-2.5 5H5zm7-9l3-4 2 1.5-3.5 3.5H12zm1.85 4.85l3.15-3.15L19 11l-4.15 4.15-1-1.3zM4 11h3v2H4v-2z"/>
+                </svg>
+            </div>
+            <div>
+                <h1 class="text-sm font-medium tracking-tight text-zinc-200">Помощник нефтяник РФ</h1>
+                <p class="text-xs text-zinc-500">База учебных материалов</p>
+            </div>
+        </div>
+        <div id="nav-actions" class="text-xs text-zinc-400"></div>
+    </header>
+
+    <main class="flex-1 max-w-xl w-full mx-auto p-6 flex flex-col justify-center">
+        <div id="app-view"></div>
+    </main>
+
+    <div id="modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 relative shadow-2xl">
+            <button onclick="closeModal()" class="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 transition">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/></svg>
+            </button>
+            <div id="modal-content"></div>
+        </div>
+    </div>
+
+    <footer class="w-full border-t border-zinc-900/60 py-4 text-center flex flex-col gap-1">
+        <div class="text-xs text-zinc-600">&copy; 2026 Помощник нефтяник РФ. Все права защищены.</div>
+        <div class="text-[11px] text-zinc-600 font-light">Создано выпускниками РФ</div>
+    </footer>
+
+    <script>
+        const db = {
+            courses: [
+                { id: 1, name: "1 курс", semesters: [
+                    { id: 1, name: "1 семестр", subjects: [
+                        { id: 101, name: "Высшая математика", files: [
+                            { id: 1001, name: "Домашнее задание #1", type: "free", size: "1.2 MB", desc: "Пределы и производные. Полное решение." },
+                            { id: 1002, name: "Расчетно-графическая работа", type: "paid", price: "150 ₽", size: "3.4 MB", desc: "Интегралы и ряды с пояснениями." }
+                        ]},
+                        { id: 102, name: "Общая физика", files: [
+                            { id: 1003, name: "Лабораторная работа #1", type: "free", size: "850 KB", desc: "Механика, обработка результатов." }
+                        ]}
+                    ]},
+                    { id: 2, name: "2 семестр", subjects: [
+                        { id: 103, name: "Химия нефти и газа", files: [
+                            { id: 1004, name: "Домашнее задание #1", type: "paid", price: "200 ₽", size: "2.1 MB", desc: "Углеводородные соединения." }
+                        ]}
+                    ]}
+                ]},
+                { id: 2, name: "2 курс", semesters: [
+                    { id: 3, name: "1 семестр", subjects: [
+                        { id: 201, name: "Геофизика", files: [
+                            { id: 2001, name: "Домашнее задание #1", type: "free", size: "1.5 MB", desc: "Методы сейсморазведки. Вариант 4." },
+                            { id: 2002, name: "Домашнее задание #2", type: "paid", price: "250 ₽", size: "4.0 MB", desc: "Интерпретация каротажа скважин." }
+                        ]}
+                    ]},
+                    { id: 4, name: "2 семестр", subjects: [
+                        { id: 202, name: "Органическая химия", files: [
+                            { id: 2003, name: "Практикум #1", type: "free", size: "1.1 MB", desc: "Свойства алканов." }
+                        ]}
+                    ]}
+                ]},
+                { id: 3, name: "3 курс", semesters: [
+                    { id: 5, name: "1 семестр", subjects: [
+                        { id: 301, name: "Бурение нефтяных и газовых скважин", files: [
+                            { id: 3001, name: "Курсовой проект. Часть 1", type: "paid", price: "500 ₽", size: "8.2 MB", desc: "Расчет буровой колонны." }
+                        ]}
+                    ]},
+                    { id: 6, name: "2 семестр", subjects: [
+                        { id: 302, name: "Гидромеханика", files: [
+                            { id: 3002, name: "ДЗ #1", type: "free", size: "1.9 MB", desc: "Течение жидкости в трубах." }
+                        ]}
+                    ]}
+                ]},
+                { id: 4, name: "4 курс", semesters: [
+                    { id: 7, name: "1 семестр", subjects: [
+                        { id: 401, name: "Разработка нефтяных месторождений", files: [
+                            { id: 4001, name: "Практикум #1", type: "free", size: "2.3 MB", desc: "Анализ разработки залежи." }
+                        ]}
+                    ]},
+                    { id: 8, name: "2 семестр", subjects: [
+                        { id: 402, name: "Экономика нефтегазовой отрасли", files: [
+                            { id: 4002, name: "Расчетный проект", type: "paid", price: "350 ₽", size: "3.0 MB", desc: "Оценка рентабельности скважины." }
+                        ]}
+                    ]}
+                ]},
+                { id: 5, name: "5 курс", semesters: [
+                    { id: 9, name: "1 семестр", subjects: [
+                        { id: 501, name: "Проектирование НПЗ", files: [
+                            { id: 5001, name: "ДЗ #1", type: "paid", price: "300 ₽", size: "5.1 MB", desc: "Ректификационная колонна." }
+                        ]}
+                    ]},
+                    { id: 10, name: "2 семестр", subjects: [
+                        { id: 502, name: "Транспорт и хранение нефти", files: [
+                            { id: 5002, name: "Типовой расчет", type: "free", size: "2.4 MB", desc: "Гидравлический расчет трубопровода." }
+                        ]}
+                    ]}
+                ]},
+                { id: 6, name: "6 курс", semesters: [
+                    { id: 11, name: "1 семестр", subjects: [
+                        { id: 601, name: "Дипломное проектирование", files: [
+                            { id: 6001, name: "Шаблон пояснительной записки", type: "free", size: "12.0 MB", desc: "Стандарт ГОСТ." }
+                        ]}
+                    ]},
+                    { id: 12, name: "2 семестр", subjects: [
+                        { id: 602, name: "Преддипломная практика", files: [
+                            { id: 6002, name: "Отчет по практике", type: "paid", price: "600 ₽", size: "4.5 MB", desc: "Пример оформленного отчета." }
+                        ]}
+                    ]}
+                ]}
+            ]
+        };
+
+        let state = { view: 'courses', selectedCourse: null, selectedSemester: null, selectedSubject: null };
+        const appView = document.getElementById('app-view');
+        const navActions = document.getElementById('nav-actions');
+
+        // URL бэкенда — по умолчанию тот же origin, где хостится фронтенд
+        const BACKEND_URL = window.location.origin;
+
+        function render() {
+            appView.innerHTML = '';
+            navActions.innerHTML = '';
+            if (state.view === 'courses') renderCourses();
+            else if (state.view === 'semesters') renderSemesters();
+            else if (state.view === 'subjects') renderSubjects();
+            else if (state.view === 'files') renderFiles();
+        }
+
+        function renderCourses() {
+            let html = `<div class="mb-6"><h2 class="text-xl font-semibold text-zinc-100">Выберите курс</h2><p class="text-xs text-zinc-500 mt-1">Доступны материалы с 1 по 6 курс</p></div><div class="grid grid-cols-2 gap-3">`;
+            db.courses.forEach(c => {
+                html += `<button onclick="selectCourse(${c.id})" class="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex flex-col items-start text-left group"><span class="text-xs text-zinc-500">Уровень</span><span class="text-base font-medium text-zinc-200 mt-1">${c.name}</span></button>`;
+            });
+            appView.innerHTML = html + `</div>`;
+        }
+
+        function renderSemesters() {
+            navActions.innerHTML = `<button onclick="goBack()" class="text-xs text-zinc-400 hover:text-zinc-200">← Назад</button>`;
+            let html = `<div class="mb-6"><h2 class="text-xl font-semibold text-zinc-100">${state.selectedCourse.name}</h2><p class="text-xs text-zinc-500 mt-1">Выберите семестр</p></div><div class="space-y-2">`;
+            state.selectedCourse.semesters.forEach(s => {
+                html += `<button onclick="selectSemester(${s.id})" class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left"><span class="text-sm font-medium text-zinc-200">${s.name}</span><span class="text-zinc-600">→</span></button>`;
+            });
+            appView.innerHTML = html + `</div>`;
+        }
+
+        function renderSubjects() {
+            navActions.innerHTML = `<button onclick="goBack()" class="text-xs text-zinc-400 hover:text-zinc-200">← Назад</button>`;
+            let html = `<div class="mb-6"><h2 class="text-xl font-semibold text-zinc-100">${state.selectedSemester.name}</h2><p class="text-xs text-zinc-500 mt-1">Выберите предмет</p></div><div class="space-y-2">`;
+            state.selectedSemester.subjects.forEach(sub => {
+                html += `<button onclick="selectSubject(${sub.id})" class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left"><span class="text-sm font-medium text-zinc-200">${sub.name}</span><span class="text-xs text-zinc-500">${sub.files.length} файл(ов)</span></button>`;
+            });
+            appView.innerHTML = html + `</div>`;
+        }
+
+        function renderFiles() {
+            navActions.innerHTML = `<button onclick="goBack()" class="text-xs text-zinc-400 hover:text-zinc-200">← Назад</button>`;
+            let html = `<div class="mb-6"><h2 class="text-xl font-semibold text-zinc-100">${state.selectedSubject.name}</h2><p class="text-xs text-zinc-500 mt-1">Материалы для скачивания</p></div><div class="space-y-2">`;
+            state.selectedSubject.files.forEach(f => {
+                let badge = f.type === 'free' ? '<span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">Бесплатно</span>' : `<span class="text-[10px] font-semibold px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">${f.price}</span>`;
+                html += `<div onclick='openFileModal(${JSON.stringify(f)})' class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left cursor-pointer"><div><div class="text-sm font-medium text-zinc-200">${f.name}</div><div class="text-xs text-zinc-500 mt-0.5">Размер: ${f.size}</div></div><div>${badge}</div></div>`;
+            });
+            appView.innerHTML = html + `</div>`;
+        }
+
+        function selectCourse(id) { state.selectedCourse = db.courses.find(c => c.id === id); state.view = 'semesters'; render(); }
+        function selectSemester(id) { state.selectedSemester = state.selectedCourse.semesters.find(s => s.id === id); state.view = 'subjects'; render(); }
+        function selectSubject(id) { state.selectedSubject = state.selectedSemester.subjects.find(sub => sub.id === id); state.view = 'files'; render(); }
+        function goBack() {
+            if (state.view === 'semesters') state.view = 'courses';
+            else if (state.view === 'subjects') state.view = 'semesters';
+            else if (state.view === 'files') state.view = 'subjects';
+            render();
+        }
+
+        // Связь с бэкендом при нажатии на файл
+        function openFileModal(file) {
+            const modal = document.getElementById('modal');
+            const content = document.getElementById('modal-content');
+
+            let btnText = file.type === 'free' ? 'Скачать бесплатно' : `Оплатить и скачать (${file.price})`;
+
+            content.innerHTML = `
+                <div class="mb-4">
+                    <span class="text-xs text-zinc-500 uppercase tracking-wider">${state.selectedSubject.name}</span>
+                    <h3 class="text-lg font-medium text-zinc-100 mt-1">${file.name}</h3>
+                </div>
+                <p class="text-xs text-zinc-400 mb-6">${file.desc} (Размер: ${file.size})</p>
+                <div class="space-y-2">
+                    <button onclick="processAction(${file.id})" class="w-full py-2.5 px-4 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-medium text-xs transition">${btnText}</button>
+                    <button onclick="closeModal()" class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">Закрыть</button>
+                </div>
+            `;
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        async function processAction(fileId) {
+            const tg = window.Telegram.WebApp;
+            const chatId = tg.initDataUnsafe?.user?.id || 12345678; // Тест в браузере
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/create-payment`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ fileId, chatId })
+                });
+                const data = await response.json();
+
+                if (data.freeUrl) {
+                    window.open(data.freeUrl, '_blank');
+                    closeModal();
+                } else if (data.paymentUrl) {
+                    closeModal();
+                    tg.openLink(data.paymentUrl); // Открытие ЮMoney в Telegram
+                }
+            } catch (err) {
+                alert('Ошибка соединения с сервером');
+            }
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('modal');
+            modal.classList.remove('flex');
+            modal.classList.add('hidden');
+        }
+
+        render();
+    </script>
+</body>
+</html>

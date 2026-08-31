@@ -1,0 +1,17 @@
+{
+  "1001": { "name": "Домашнее задание #1", "subject": "Высшая математика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1001" },
+  "1002": { "name": "Расчетно-графическая работа", "subject": "Высшая математика", "type": "paid", "price": 150, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1002" },
+  "1003": { "name": "Лабораторная работа #1", "subject": "Общая физика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1003" },
+  "1004": { "name": "Домашнее задание #1", "subject": "Химия нефти и газа", "type": "paid", "price": 200, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1004" },
+  "2001": { "name": "Домашнее задание #1", "subject": "Геофизика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_2001" },
+  "2002": { "name": "Домашнее задание #2", "subject": "Геофизика", "type": "paid", "price": 250, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_2002" },
+  "2003": { "name": "Практикум #1", "subject": "Органическая химия", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_2003" },
+  "3001": { "name": "Курсовой проект. Часть 1", "subject": "Бурение нефтяных и газовых скважин", "type": "paid", "price": 500, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_3001" },
+  "3002": { "name": "ДЗ #1", "subject": "Гидромеханика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_3002" },
+  "4001": { "name": "Практикум #1", "subject": "Разработка нефтяных месторождений", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_4001" },
+  "4002": { "name": "Расчетный проект", "subject": "Экономика нефтегазовой отрасли", "type": "paid", "price": 350, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_4002" },
+  "5001": { "name": "ДЗ #1", "subject": "Проектирование НПЗ", "type": "paid", "price": 300, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_5001" },
+  "5002": { "name": "Типовой расчет", "subject": "Транспорт и хранение нефти", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_5002" },
+  "6001": { "name": "Шаблон пояснительной записки", "subject": "Дипломное проектирование", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_6001" },
+  "6002": { "name": "Отчет по практике", "subject": "Преддипломная практика", "type": "paid", "price": 600, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_6002" }
+}
