@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Помощник нефтяник РФ</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="/tailwind.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 </head>
@@ -248,8 +250,26 @@
                 <p class="text-xs text-zinc-400 mb-5">${group.desc || ''}</p>
                 <div class="space-y-2" id="modal-actions-container">
                     <button onclick='showVariants(${JSON.stringify(group)})' class="w-full py-2.5 px-4 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-medium text-xs transition">Выбрать вариант</button>
+                    <button onclick='openTaskInfo(${JSON.stringify(group)})' class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">Ознакомиться с заданием</button>
                 </div>`;
             document.getElementById('modal').classList.replace('hidden', 'flex');
+        }
+
+        function openTaskInfo(group) {
+            const content = document.getElementById('modal-content');
+            content.innerHTML = `
+                <div class="mb-4">
+                    <span class="text-xs text-zinc-500 uppercase tracking-wider">${state.subject}</span>
+                    <h3 class="text-lg font-medium text-zinc-100 mt-1">${group.name}</h3>
+                </div>
+                <div class="bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-4 mb-4 max-h-64 overflow-y-auto">
+                    <p class="text-sm text-zinc-300 leading-relaxed">${group.desc || 'Описание недоступно'}</p>
+                    <div class="mt-4 text-xs text-zinc-500">
+                        <p><strong>Предмет:</strong> ${state.subject}</p>
+                        <p><strong>Вариантов:</strong> ${group.variants.length}</p>
+                    </div>
+                </div>
+                <button onclick='openFileModal(${JSON.stringify(group)})' class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">← Назад</button>`;
         }
 
         function showVariants(group) {
