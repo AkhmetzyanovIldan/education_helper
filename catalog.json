@@ -1,6 +1,6 @@
 {
   "1001": { "name": "Домашнее задание #1", "subject": "Высшая математика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1001" },
-  "1002": { "name": "Расчетно-графическая работа", "subject": "Высшая математика", "type": "paid", "price": 150, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1002" },
+  "1002": { "name": "Расчетно-графическая работа", "subject": "Высшая математика", "type": "paid", "price": 10, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1002" },
   "1003": { "name": "Лабораторная работа #1", "subject": "Общая физика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1003" },
   "1004": { "name": "Домашнее задание #1", "subject": "Химия нефти и газа", "type": "paid", "price": 200, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1004" },
   "2001": { "name": "Домашнее задание #1", "subject": "Геофизика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_2001" },
