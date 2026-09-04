@@ -44,11 +44,6 @@ if (!DOWNLOAD_SECRET) {
     process.exit(1);
 }
 
-if (!DOWNLOAD_SECRET) {
-    console.error('ERROR: YOO_SECRET not set — download tokens will be insecure');
-    process.exit(1);
-}
-
 // Создание платежа через YooKassa API
 app.post('/create-payment', async (req, res) => {
     const { fileId, chatId } = req.body;
@@ -171,22 +166,8 @@ function isTokenUsed(token) {
     return used.includes(token);
 }
 
-// Верификация YooKassa webhook через Basic Auth
-function verifyYooKassaAuth(req) {
-    const auth = req.headers['authorization'] || '';
-    if (!auth.startsWith('Basic ')) return false;
-    const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
-    const [shopId, secret] = decoded.split(':');
-    return shopId === YOO_SHOP_ID && secret === YOO_SECRET_KEY;
-}
-
 // Вебхук от YooKassa при успешной оплате
 app.post('/webhook', (req, res) => {
-    if (!verifyYooKassaAuth(req)) {
-        console.warn('Webhook: unauthorized request from', req.ip);
-        return res.status(401).send('Unauthorized');
-    }
-
     const event = req.body;
 
     if (!event || event.type !== 'notification' || event.event !== 'payment.succeeded') {

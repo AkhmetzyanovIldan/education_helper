@@ -247,7 +247,7 @@
                     <span class="text-xs text-zinc-500 uppercase tracking-wider">${state.subject}</span>
                     <h3 class="text-lg font-medium text-zinc-100 mt-1">${group.name}</h3>
                 </div>
-                <p class="text-xs text-zinc-400 mb-5">${group.desc || ''}</p>
+                <p class="text-xs text-zinc-400 mb-8">${group.desc || ''}</p>
                 <div class="space-y-2" id="modal-actions-container">
                     <button onclick='showVariants(${JSON.stringify(group)})' class="w-full py-2.5 px-4 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-medium text-xs transition">Выбрать вариант</button>
                     <button onclick='openTaskInfo(${JSON.stringify(group)})' class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">Ознакомиться с заданием</button>
@@ -303,7 +303,7 @@
                 const data = await res.json();
 
                 if (data.freeUrl) {
-                    window.open(data.freeUrl, '_blank');
+                    window.location.href = data.freeUrl;
                     closeModal();
                     return;
                 }
