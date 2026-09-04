@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const TelegramBot = require('node-telegram-bot-api');
 const catalog = require('./catalog.json');
+const { Readable } = require('stream');
 
 const app = express();
 app.use(cors());
@@ -28,8 +29,12 @@ if (process.env.TELEGRAM_WEBHOOK_URL) {
     console.log('Telegram bot running in polling mode');
 }
 
-// Создание ссылки на оплату
-app.post('/create-payment', (req, res) => {
+const YOOKASSA_API_URL = 'https://api.yookassa.ru/v3';
+const YOO_SHOP_ID = process.env.YOO_SHOP_ID || process.env.YOOKASSA_SHOP_ID || '';
+const YOO_SECRET_KEY = process.env.YOO_SECRET_KEY || process.env.YOOKASSA_SECRET_KEY || process.env.YOO_SECRET || '';
+
+// Создание платежа через YooKassa API
+app.post('/create-payment', async (req, res) => {
     const { fileId, chatId } = req.body;
     const item = catalog[fileId];
     if (!item) return res.status(404).json({ error: 'Товар не найден' });
@@ -39,10 +44,51 @@ app.post('/create-payment', (req, res) => {
         return res.json({ freeUrl: item.fileUrl });
     }
 
-    const label = `${fileId}_${chatId}_${Date.now()}`;
-    const paymentUrl = `https://yoomoney.ru/quickpay/confirm?receiver=${process.env.YOO_WALLET}&quickpay-form=shop&sum=${item.price}&label=${label}&targets=Оплата файла: ${item.name}`;
-    
-    res.json({ paymentUrl });
+    if (!YOO_SHOP_ID || !YOO_SECRET_KEY) {
+        return res.status(500).json({ error: 'YOO_SHOP_ID и YOO_SECRET_KEY должны быть настроены в окружении' });
+    }
+
+    try {
+        const response = await fetch(`${YOOKASSA_API_URL}/payments`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Basic ' + Buffer.from(`${YOO_SHOP_ID}:${YOO_SECRET_KEY}`).toString('base64')
+            },
+            body: JSON.stringify({
+                amount: {
+                    value: String(item.price),
+                    currency: 'RUB'
+                },
+                capture: true,
+                description: `Оплата файла: ${item.name}`,
+                confirmation: {
+                    type: 'redirect',
+                    return_url: process.env.APP_URL || 'https://education-helper.onrender.com/'
+                },
+                metadata: {
+                    fileId,
+                    chatId
+                }
+            })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            console.error('YooKassa payment creation failed:', data);
+            return res.status(502).json({ error: 'Ошибка создания платежа', details: data });
+        }
+
+        if (!data || !data.confirmation || !data.confirmation.confirmation_url) {
+            return res.status(500).json({ error: 'Не получена ссылка для оплаты' });
+        }
+
+        res.json({ paymentUrl: data.confirmation.confirmation_url, paymentId: data.id });
+    } catch (err) {
+        console.error('Error creating YooKassa payment:', err);
+        res.status(500).json({ error: 'Ошибка создания платежа' });
+    }
 });
 
 // Отдать каталог в JSON (публично доступно)
@@ -78,43 +124,88 @@ function savePayment(record) {
     }
 }
 
-// Вебхук от ЮMoney при успешной оплате
+// Одноразовые токены для скачивания
+const USED_TOKENS_FILE = path.join(__dirname, 'used_tokens.json');
+function loadUsedTokens() {
+    try {
+        if (!fs.existsSync(USED_TOKENS_FILE)) return [];
+        const raw = fs.readFileSync(USED_TOKENS_FILE, 'utf8');
+        return JSON.parse(raw || '[]');
+    } catch (err) {
+        console.error('loadUsedTokens error', err);
+        return [];
+    }
+}
+
+function saveUsedToken(token) {
+    try {
+        const used = loadUsedTokens();
+        used.push(token);
+        fs.writeFileSync(USED_TOKENS_FILE, JSON.stringify(used, null, 2), 'utf8');
+    } catch (err) {
+        console.error('saveUsedToken error', err);
+    }
+}
+
+function isTokenUsed(token) {
+    const used = loadUsedTokens();
+    return used.includes(token);
+}
+
+// Вебхук от YooKassa при успешной оплате
 app.post('/webhook', (req, res) => {
-    const { notification_type, operation_id, amount, currency, datetime, sender, codepro, label, sha1_hash } = req.body;
-    
-    const hashString = `${notification_type}&${operation_id}&${amount}&${currency}&${datetime}&${sender}&${codepro}&${process.env.YOO_SECRET}&${label}`;
-    const hash = crypto.createHash('sha1').update(hashString).digest('hex');
+    const event = req.body;
 
-    if (hash !== sha1_hash) return res.status(400).send('Hash error');
+    if (!event || event.type !== 'notification' || event.event !== 'payment.succeeded') {
+        return res.status(200).send('OK');
+    }
 
-    const [fileId, chatId] = label.split('_');
+    const payment = event.object;
+    if (!payment || !payment.metadata) {
+        return res.status(400).send('Missing payment metadata');
+    }
+
+    const { fileId, chatId } = payment.metadata;
     const item = catalog[fileId];
 
-    if (item && chatId) {
-        // Создаём временную защищённую ссылку (действительна N минут)
-        const expiresSec = parseInt(process.env.DOWNLOAD_TOKEN_TTL || '900', 10); // 15 минут по умолчанию
-        const expiresAt = Math.floor(Date.now() / 1000) + expiresSec;
-        const payload = `${fileId}|${chatId}|${expiresAt}`;
-        const hmac = crypto.createHmac('sha256', process.env.YOO_SECRET || 'secret').update(payload).digest('hex');
-        const token = Buffer.from(payload).toString('base64') + '.' + hmac;
-
-        const appUrl = process.env.APP_URL || '';
-        const downloadLink = appUrl ? `${appUrl}/download/${encodeURIComponent(token)}` : `/download/${encodeURIComponent(token)}`;
-
-        bot.sendMessage(chatId, `✅ Оплата прошла успешно! Ваш файл: ${item.name}\nСсылка для скачивания (временно): ${downloadLink}`)
-            .catch(err => console.error('bot.sendMessage error', err));
-
-        // Сохраняем запись об оплате
-        savePayment({ operation_id, fileId, chatId, amount, datetime, downloadLink, receivedAt: new Date().toISOString() });
+    if (!item || !chatId) {
+        return res.status(400).send('Invalid payment metadata');
     }
+
+    // Создаём временную защищённую ссылку (действительна N минут)
+    const expiresSec = parseInt(process.env.DOWNLOAD_TOKEN_TTL || '900', 10);
+    const expiresAt = Math.floor(Date.now() / 1000) + expiresSec;
+    const payload = `${fileId}|${chatId}|${expiresAt}`;
+    const hmac = crypto.createHmac('sha256', process.env.YOO_SECRET || 'secret').update(payload).digest('hex');
+    const token = Buffer.from(payload).toString('base64') + '.' + hmac;
+
+    const appUrl = process.env.APP_URL || '';
+    const downloadLink = appUrl ? `${appUrl}/download/${encodeURIComponent(token)}` : `/download/${encodeURIComponent(token)}`;
+
+    bot.sendMessage(chatId, `✅ Оплата прошла успешно! Ваш файл: ${item.name}\nСсылка для скачивания (временно): ${downloadLink}`)
+        .catch(err => console.error('bot.sendMessage error', err));
+
+    savePayment({
+        event: event.event,
+        paymentId: payment.id,
+        fileId,
+        chatId,
+        amount: payment.amount,
+        datetime: new Date().toISOString(),
+        downloadLink,
+        receivedAt: new Date().toISOString()
+    });
+
     res.status(200).send('OK');
 });
 
 // Маршрут для проверки и выдачи временных ссылок
-app.get('/download/:token', (req, res) => {
+app.get('/download/:token', async (req, res) => {
     try {
         const token = req.params.token;
         const [b64, hmac] = token.split('.');
+        if (!b64 || !hmac) return res.status(400).send('Bad token');
+
         const payload = Buffer.from(b64, 'base64').toString('utf8');
         const expected = crypto.createHmac('sha256', process.env.YOO_SECRET || 'secret').update(payload).digest('hex');
         if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(hmac))) return res.status(403).send('Invalid token');
@@ -123,11 +214,30 @@ app.get('/download/:token', (req, res) => {
         const expiresAt = parseInt(expiresAtStr, 10);
         if (Math.floor(Date.now() / 1000) > expiresAt) return res.status(410).send('Link expired');
 
+        if (isTokenUsed(token)) return res.status(410).send('Token already used');
+
         const item = catalog[fileId];
         if (!item) return res.status(404).send('File not found');
 
-        // Перенаправляем на фактический URL файла (можно заменить на проксирование/стриминг)
-        return res.redirect(item.fileUrl);
+        saveUsedToken(token);
+
+        const fileUrl = item.fileUrl;
+        if (!fileUrl) return res.status(404).send('File not found');
+
+        const response = await fetch(fileUrl);
+        if (!response.ok || !response.body) {
+            return res.status(502).send('Failed to fetch file from storage');
+        }
+
+        const contentType = response.headers.get('content-type') || 'application/octet-stream';
+        const contentDisposition = `attachment; filename="${encodeURIComponent(item.name || 'file')}.bin"`;
+
+        res.setHeader('Content-Type', contentType);
+        res.setHeader('Content-Disposition', contentDisposition);
+        res.setHeader('Cache-Control', 'no-store');
+
+        const stream = Readable.fromWeb(response.body);
+        stream.pipe(res);
     } catch (err) {
         console.error('download error', err);
         return res.status(400).send('Bad token');
