@@ -12,6 +12,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.static('public'));
 
 if (!process.env.BOT_TOKEN) {
     console.error('ERROR: BOT_TOKEN not set in environment');

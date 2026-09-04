@@ -1,8 +1,8 @@
 {
   "1001_2": { "name": "Домашнее задание #1", "variant": "2 вариант", "subject": "Высшая математика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1001_2" },
-  "1001_18": { "name": "Домашнее задание #1", "variant": "18 вариант", "subject": "Высшая математика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1001_18" },
-  "1002_2": { "name": "Расчетно-графическая работа", "variant": "2 вариант", "subject": "Высшая математика", "type": "paid", "price": 150, "fileUrl": "https://docs.google.com/uc?export=download&confirm=1&id=1lPYz74FCdQwd7aYvzn5HbcShFZ1Jer07" },
-  "1002_18": { "name": "Расчетно-графическая работа", "variant": "18 вариант", "subject": "Высшая математика", "type": "paid", "price": 150, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1002_18" },
+  "1001_18": { "name": "Домашнее задание #1", "variant": "18 вариант", "subject": "Высшая математика", "type": "free", "price": 0, "fileUrl": "https://docs.google.com/uc?export=download&confirm=1&id=1lPYz74FCdQwd7aYvzn5HbcShFZ1Jer07" },
+  "1002_2": { "name": "Расчетно-графическая работа", "variant": "2 вариант", "subject": "Высшая математика", "type": "paid", "price": 10, "fileUrl": "https://docs.google.com/uc?export=download&confirm=1&id=1lPYz74FCdQwd7aYvzn5HbcShFZ1Jer07" },
+  "1002_18": { "name": "Расчетно-графическая работа", "variant": "18 вариант", "subject": "Высшая математика", "type": "paid", "price": 10, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1002_18" },
   "1003_1": { "name": "Лабораторная работа #1", "variant": "1 вариант", "subject": "Общая физика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1003_1" },
   "1004_5": { "name": "Домашнее задание #1", "variant": "5 вариант", "subject": "Химия нефти и газа", "type": "paid", "price": 200, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_1004_5" },
   "2001_4": { "name": "Домашнее задание #1", "variant": "4 вариант", "subject": "Геофизика", "type": "free", "price": 0, "fileUrl": "https://drive.google.com/uc?export=download&id=ВАШ_ID_ФАЙЛА_2001_4" },
