@@ -6,13 +6,9 @@
     <title>Помощник нефтяник РФ</title>
     <link rel="stylesheet" href="/tailwind.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <style>
-        body { font-family: 'Inter', sans-serif; }
-    </style>
 </head>
 <body class="bg-zinc-950 text-zinc-100 min-h-screen flex flex-col justify-between selection:bg-zinc-800">
 
-    <!-- Header -->
     <header class="w-full border-b border-zinc-800/60 py-4 px-6 flex items-center justify-between bg-zinc-900/40 backdrop-blur-md sticky top-0 z-10">
         <div class="flex items-center gap-3">
             <div class="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300">
@@ -28,12 +24,11 @@
         <div id="nav-actions" class="text-xs text-zinc-400"></div>
     </header>
 
-    <!-- Main Container -->
     <main class="flex-1 max-w-xl w-full mx-auto p-6 flex flex-col justify-center">
         <div id="app-view"></div>
     </main>
 
-    <!-- Modal for File Info / Variants -->
+    <!-- Modal -->
     <div id="modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
         <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 relative shadow-2xl">
             <button onclick="closeModal()" class="absolute top-4 right-4 text-zinc-500 hover:text-zinc-300 transition">
@@ -43,7 +38,7 @@
         </div>
     </div>
 
-    <!-- Support Modal / Chat -->
+    <!-- Support Modal -->
     <div id="support-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
         <div class="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 relative shadow-2xl flex flex-col h-[480px]">
             <div class="flex items-center justify-between pb-4 border-b border-zinc-800">
@@ -55,206 +50,81 @@
                     <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6 18L18 6M6 6l12 12"/></svg>
                 </button>
             </div>
-            
-            <!-- Chat Messages Container -->
             <div id="chat-messages" class="flex-1 overflow-y-auto py-4 space-y-3 text-xs pr-1">
                 <div class="bg-zinc-800/60 p-3 rounded-xl text-zinc-300 max-w-[85%]">
-                    Здравствуйте! Напишите ваш вопрос или опишите проблему. Администратор ответит или обработает запрос в ближайшее время.
+                    Здравствуйте! Напишите ваш вопрос или опишите проблему. Администратор ответит в ближайшее время.
                 </div>
             </div>
-
-            <!-- Chat Input Form -->
             <form id="chat-form" onsubmit="sendSupportMessage(event)" class="pt-3 border-t border-zinc-800 flex gap-2">
-                <input type="text" id="chat-input" placeholder="Введите ваше сообщение..." required class="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-700 transition">
+                <input type="text" id="chat-input" placeholder="Введите ваше сообщение..." required
+                    class="flex-1 bg-zinc-950 border border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-700 transition">
                 <button type="submit" class="bg-zinc-100 hover:bg-white text-zinc-950 font-medium px-4 py-2.5 rounded-xl text-xs transition">Отправить</button>
             </form>
         </div>
     </div>
 
-    <!-- Footer -->
     <footer class="w-full border-t border-zinc-900/60 py-4 text-center flex flex-col gap-1">
         <div class="text-xs text-zinc-600">&copy; 2026 Помощник нефтяник РФ. Все права защищены.</div>
         <div class="text-[11px] text-zinc-600 font-light">Создано выпускниками РФ</div>
     </footer>
 
     <script>
-        const db = {
-            courses: [
-                { id: 1, name: "1 курс", semesters: [
-                    { id: 1, name: "1 семестр", subjects: [
-                        { id: 101, name: "Высшая математика", files: [
-                            { id: 1001, name: "Домашнее задание #1", type: "free", size: "1.2 MB", desc: "Пределы и производные. Полное решение.", variants: [
-                                { id: "2", name: "2 вариант", type: "free", size: "1.2 MB" },
-                                { id: "18", name: "18 вариант", type: "free", size: "1.3 MB" }
-                            ]},
-                            { id: 1002, name: "Расчетно-графическая работа", type: "paid", price: "150 ₽", size: "3.4 MB", desc: "Интегралы и ряды с пояснениями.", variants: [
-                                { id: "2", name: "2 вариант", type: "paid", price: "150 ₽", size: "3.4 MB" },
-                                { id: "18", name: "18 вариант", type: "paid", price: "150 ₽", size: "3.5 MB" }
-                            ]}
-                        ]},
-                        { id: 102, name: "Общая физика", files: [
-                            { id: 1003, name: "Лабораторная работа #1", type: "free", size: "850 KB", desc: "Механика, обработка результатов.", variants: [
-                                { id: "1", name: "1 вариант", type: "free", size: "850 KB" }
-                            ]}
-                        ]}
-                    ]},
-                    { id: 2, name: "2 семестр", subjects: [
-                        { id: 103, name: "Химия нефти и газа", files: [
-                            { id: 1004, name: "Домашнее задание #1", type: "paid", price: "200 ₽", size: "2.1 MB", desc: "Углеводородные соединения.", variants: [
-                                { id: "5", name: "5 вариант", type: "paid", price: "200 ₽", size: "2.1 MB" }
-                            ]}
-                        ]}
-                    ]}
-                ]},
-                { id: 2, name: "2 курс", semesters: [
-                    { id: 3, name: "1 семестр", subjects: [
-                        { id: 201, name: "Геофизика", files: [
-                            { id: 2001, name: "Домашнее задание #1", type: "free", size: "1.5 MB", desc: "Методы сейсморазведки. Вариант 4.", variants: [
-                                { id: "4", name: "4 вариант", type: "free", size: "1.5 MB" }
-                            ]},
-                            { id: 2002, name: "Домашнее задание #2", type: "paid", price: "250 ₽", size: "4.0 MB", desc: "Интерпретация каротажа скважин.", variants: [
-                                { id: "2", name: "2 вариант", type: "paid", price: "250 ₽", size: "4.0 MB" },
-                                { id: "18", name: "18 вариант", type: "paid", price: "250 ₽", size: "4.1 MB" }
-                            ]}
-                        ]}
-                    ]},
-                    { id: 4, name: "2 семестр", subjects: [
-                        { id: 202, name: "Органическая химия", files: [
-                            { id: 2003, name: "Практикум #1", type: "free", size: "1.1 MB", desc: "Свойства алканов.", variants: [
-                                { id: "1", name: "1 вариант", type: "free", size: "1.1 MB" }
-                            ]}
-                        ]}
-                    ]}
-                ]},
-                { id: 3, name: "3 курс", semesters: [
-                    { id: 5, name: "1 семестр", subjects: [
-                        { id: 301, name: "Бурение нефтяных и газовых скважин", files: [
-                            { id: 3001, name: "Курсовой проект. Часть 1", type: "paid", price: "500 ₽", size: "8.2 MB", desc: "Расчет буровой колонны.", variants: [
-                                { id: "2", name: "2 вариант", type: "paid", price: "500 ₽", size: "8.2 MB" },
-                                { id: "18", name: "18 вариант", type: "paid", price: "500 ₽", size: "8.4 MB" }
-                            ]}
-                        ]}
-                    ]},
-                    { id: 6, name: "2 семестр", subjects: [
-                        { id: 302, name: "Гидромеханика", files: [
-                            { id: 3002, name: "ДЗ #1", type: "free", size: "1.9 MB", desc: "Течение жидкости в трубах.", variants: [
-                                { id: "3", name: "3 вариант", type: "free", size: "1.9 MB" }
-                            ]}
-                        ]}
-                    ]}
-                ]},
-                { id: 4, name: "4 курс", semesters: [
-                    { id: 7, name: "1 семестр", subjects: [
-                        { id: 401, name: "Разработка нефтяных месторождений", files: [
-                            { id: 4001, name: "Практикум #1", type: "free", size: "2.3 MB", desc: "Анализ разработки залежи.", variants: [
-                                { id: "1", name: "1 вариант", type: "free", size: "2.3 MB" }
-                            ]}
-                        ]}
-                    ]},
-                    { id: 8, name: "2 семестр", subjects: [
-                        { id: 402, name: "Экономика нефтегазовой отрасли", files: [
-                            { id: 4002, name: "Расчетный проект", type: "paid", price: "350 ₽", size: "3.0 MB", desc: "Оценка рентабельности скважины.", variants: [
-                                { id: "2", name: "2 вариант", type: "paid", price: "350 ₽", size: "3.0 MB" }
-                            ]}
-                        ]}
-                    ]}
-                ]},
-                { id: 5, name: "5 курс", semesters: [
-                    { id: 9, name: "1 семестр", subjects: [
-                        { id: 501, name: "Проектирование НПЗ", files: [
-                            { id: 5001, name: "ДЗ #1", type: "paid", price: "300 ₽", size: "5.1 MB", desc: "Ректификационная колонна.", variants: [
-                                { id: "2", name: "2 вариант", type: "paid", price: "300 ₽", size: "5.1 MB" },
-                                { id: "18", name: "18 вариант", type: "paid", price: "300 ₽", size: "5.2 MB" }
-                            ]}
-                        ]}
-                    ]},
-                    { id: 10, name: "2 семестр", subjects: [
-                        { id: 502, name: "Транспорт и хранение нефти", files: [
-                            { id: 5002, name: "Типовой расчет", type: "free", size: "2.4 MB", desc: "Гидравлический расчет трубопровода.", variants: [
-                                { id: "1", name: "1 вариант", type: "free", size: "2.4 MB" }
-                            ]}
-                        ]}
-                    ]}
-                ]},
-                { id: 6, name: "6 курс", semesters: [
-                    { id: 11, name: "1 семестр", subjects: [
-                        { id: 601, name: "Дипломное проектирование", files: [
-                            { id: 6001, name: "Шаблон пояснительной записки", type: "free", size: "12.0 MB", desc: "Стандарт ГОСТ.", variants: [
-                                { id: "1", name: "Основной вариант", type: "free", size: "12.0 MB" }
-                            ]}
-                        ]}
-                    ]},
-                    { id: 12, name: "2 семестр", subjects: [
-                        { id: 602, name: "Преддипломная практика", files: [
-                            { id: 6002, name: "Отчет по практике", type: "paid", price: "600 ₽", size: "4.5 MB", desc: "Пример оформленного отчета.", variants: [
-                                { id: "1", name: "Основной вариант", type: "paid", price: "600 ₽", size: "4.5 MB" }
-                            ]}
-                        ]}
-                    ]}
-                ]}
-            ]
-        };
+        const BACKEND_URL = window.location.origin;
 
-        let state = {
-            view: 'courses',
-            selectedCourse: null,
-            selectedSemester: null,
-            selectedSubject: null
-        };
+        // Состояние навигации
+        let state = { view: 'courses', course: null, semester: null, subject: null };
+
+        // Каталог загружается один раз
+        let catalog = {};
+
+        // Структура для навигации, строится из каталога
+        let tree = {}; // { course: { semester: { subject: [ {fileId, item} ] } } }
 
         const appView = document.getElementById('app-view');
         const navActions = document.getElementById('nav-actions');
-        const BACKEND_URL = window.location.origin || 'http://localhost:3000';
 
-        // Функция для загрузки каталога и обновления цен
-        async function loadCatalogPrices() {
+        function getChatId() {
+            const tg = window.Telegram?.WebApp?.initDataUnsafe?.user;
+            if (tg?.id) return String(tg.id);
+            return null;
+        }
+
+        // Строим дерево навигации из плоского каталога
+        function buildTree(cat) {
+            const t = {};
+            for (const [fileId, item] of Object.entries(cat)) {
+                const { course, semester, subject } = item;
+                if (!t[course]) t[course] = {};
+                if (!t[course][semester]) t[course][semester] = {};
+                if (!t[course][semester][subject]) t[course][semester][subject] = [];
+                t[course][semester][subject].push({ fileId, item });
+            }
+            return t;
+        }
+
+        async function init() {
+            appView.innerHTML = '<div class="text-center text-zinc-500 text-sm py-12">Загрузка...</div>';
             try {
-                const response = await fetch(`${BACKEND_URL}/api/catalog`);
-                const catalog = await response.json();
-                
-                // Обновляем цены в db на основе каталога
-                db.courses.forEach(course => {
-                    course.semesters.forEach(semester => {
-                        semester.subjects.forEach(subject => {
-                            subject.files.forEach(file => {
-                                file.variants.forEach(variant => {
-                                    const catalogKey = file.id + '_' + variant.id;
-                                    const catalogItem = catalog[catalogKey];
-                                    if (catalogItem) {
-                                        variant.type = catalogItem.type;
-                                        if (catalogItem.type === 'paid') {
-                                            variant.price = catalogItem.price + ' ₽';
-                                        }
-                                    }
-                                });
-                            });
-                        });
-                    });
-                });
-                
+                const res = await fetch(`${BACKEND_URL}/api/catalog`);
+                catalog = await res.json();
+                tree = buildTree(catalog);
                 render();
-            } catch (error) {
-                console.error('Failed to load catalog prices:', error);
-                render();
+            } catch (e) {
+                appView.innerHTML = '<div class="text-center text-zinc-500 text-sm py-12">Ошибка загрузки каталога</div>';
             }
         }
 
         function render() {
             appView.innerHTML = '';
             navActions.innerHTML = '';
-
-            if (state.view === 'courses') {
-                renderCourses();
-            } else if (state.view === 'semesters') {
-                renderSemesters();
-            } else if (state.view === 'subjects') {
-                renderSubjects();
-            } else if (state.view === 'files') {
-                renderFiles();
-            }
+            if (state.view === 'courses')   renderCourses();
+            if (state.view === 'semesters') renderSemesters();
+            if (state.view === 'subjects')  renderSubjects();
+            if (state.view === 'files')     renderFiles();
         }
 
         function renderCourses() {
+            const courses = Object.keys(tree).sort();
             let html = `
                 <div class="mb-6 flex items-center justify-between">
                     <div>
@@ -266,292 +136,210 @@
                         Поддержка
                     </button>
                 </div>
-                <div class="grid grid-cols-2 gap-3">
-            `;
-            db.courses.forEach(c => {
+                <div class="grid grid-cols-2 gap-3">`;
+            courses.forEach(c => {
                 html += `
-                    <button onclick="selectCourse(${c.id})" class="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex flex-col items-start text-left group">
+                    <button onclick="selectCourse('${esc(c)}')" class="p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex flex-col items-start text-left group">
                         <span class="text-xs text-zinc-500 group-hover:text-zinc-400">Уровень</span>
-                        <span class="text-base font-medium text-zinc-200 mt-1">${c.name}</span>
-                    </button>
-                `;
+                        <span class="text-base font-medium text-zinc-200 mt-1">${c}</span>
+                    </button>`;
             });
-            html += `</div>`;
+            html += '</div>';
             appView.innerHTML = html;
         }
 
         function renderSemesters() {
             navActions.innerHTML = `<button onclick="goBack()" class="text-xs text-zinc-400 hover:text-zinc-200 transition">← Назад</button>`;
+            const semesters = Object.keys(tree[state.course]).sort();
             let html = `
                 <div class="mb-6">
-                    <h2 class="text-xl font-semibold tracking-tight text-zinc-100">${state.selectedCourse.name}</h2>
+                    <h2 class="text-xl font-semibold tracking-tight text-zinc-100">${state.course}</h2>
                     <p class="text-xs text-zinc-500 mt-1">Выберите семестр обучения</p>
                 </div>
-                <div class="space-y-2">
-            `;
-            state.selectedCourse.semesters.forEach(s => {
+                <div class="space-y-2">`;
+            semesters.forEach(s => {
                 html += `
-                    <button onclick="selectSemester(${s.id})" class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left">
-                        <span class="text-sm font-medium text-zinc-200">${s.name}</span>
+                    <button onclick="selectSemester('${esc(s)}')" class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left">
+                        <span class="text-sm font-medium text-zinc-200">${s}</span>
                         <span class="text-zinc-600">→</span>
-                    </button>
-                `;
+                    </button>`;
             });
-            html += `</div>`;
+            html += '</div>';
             appView.innerHTML = html;
         }
 
         function renderSubjects() {
             navActions.innerHTML = `<button onclick="goBack()" class="text-xs text-zinc-400 hover:text-zinc-200 transition">← Назад</button>`;
+            const subjects = Object.keys(tree[state.course][state.semester]).sort();
             let html = `
                 <div class="mb-6">
-                    <h2 class="text-xl font-semibold tracking-tight text-zinc-100">${state.selectedSemester.name}</h2>
+                    <h2 class="text-xl font-semibold tracking-tight text-zinc-100">${state.semester}</h2>
                     <p class="text-xs text-zinc-500 mt-1">Выберите учебный предмет</p>
                 </div>
-                <div class="space-y-2">
-            `;
-            state.selectedSemester.subjects.forEach(sub => {
+                <div class="space-y-2">`;
+            subjects.forEach(sub => {
+                const count = tree[state.course][state.semester][sub].length;
                 html += `
-                    <button onclick="selectSubject(${sub.id})" class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left">
-                        <span class="text-sm font-medium text-zinc-200">${sub.name}</span>
-                        <span class="text-xs text-zinc-500">${sub.files.length} файл(ов)</span>
-                    </button>
-                `;
+                    <button onclick="selectSubject('${esc(sub)}')" class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left">
+                        <span class="text-sm font-medium text-zinc-200">${sub}</span>
+                        <span class="text-xs text-zinc-500">${count} файл(ов)</span>
+                    </button>`;
             });
-            html += `</div>`;
+            html += '</div>';
             appView.innerHTML = html;
         }
 
         function renderFiles() {
             navActions.innerHTML = `<button onclick="goBack()" class="text-xs text-zinc-400 hover:text-zinc-200 transition">← Назад</button>`;
+            const entries = tree[state.course][state.semester][state.subject];
+
+            // Группируем по имени файла (одно задание = несколько вариантов)
+            const groups = {};
+            entries.forEach(({ fileId, item }) => {
+                if (!groups[item.name]) groups[item.name] = { name: item.name, desc: item.desc, variants: [] };
+                groups[item.name].variants.push({ fileId, item });
+            });
+
             let html = `
                 <div class="mb-6">
-                    <h2 class="text-xl font-semibold tracking-tight text-zinc-100">${state.selectedSubject.name}</h2>
+                    <h2 class="text-xl font-semibold tracking-tight text-zinc-100">${state.subject}</h2>
                     <p class="text-xs text-zinc-500 mt-1">Доступные материалы для скачивания</p>
                 </div>
-                <div class="space-y-2">
-            `;
-            state.selectedSubject.files.forEach(f => {
-                let badge = f.type === 'free' 
-                    ? '<span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">Бесплатно</span>'
-                    : `<span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">${f.price}</span>`;
+                <div class="space-y-2">`;
+
+            Object.values(groups).forEach(group => {
+                const hasPaid = group.variants.some(v => v.item.type === 'paid');
+                const minPrice = hasPaid ? Math.min(...group.variants.filter(v => v.item.type === 'paid').map(v => v.item.price)) : 0;
+                const badge = hasPaid
+                    ? `<span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">от ${minPrice} ₽</span>`
+                    : `<span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">Бесплатно</span>`;
 
                 html += `
-                    <div onclick='openFileModal(${JSON.stringify(f)})' class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left cursor-pointer">
+                    <div onclick='openFileModal(${JSON.stringify(group)})' class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left cursor-pointer">
                         <div>
-                            <div class="text-sm font-medium text-zinc-200">${f.name}</div>
-                            <div class="text-xs text-zinc-500 mt-0.5">Размер: ${f.size}</div>
+                            <div class="text-sm font-medium text-zinc-200">${group.name}</div>
+                            <div class="text-xs text-zinc-500 mt-0.5">${group.variants.length} вариант(ов)</div>
                         </div>
                         <div>${badge}</div>
-                    </div>
-                `;
+                    </div>`;
             });
-            html += `</div>`;
+            html += '</div>';
             appView.innerHTML = html;
         }
 
-        function selectCourse(id) {
-            state.selectedCourse = db.courses.find(c => c.id === id);
-            state.view = 'semesters';
-            render();
-        }
-
-        function selectSemester(id) {
-            state.selectedSemester = state.selectedCourse.semesters.find(s => s.id === id);
-            state.view = 'subjects';
-            render();
-        }
-
-        function selectSubject(id) {
-            state.selectedSubject = state.selectedSemester.subjects.find(sub => sub.id === id);
-            state.view = 'files';
-            render();
-        }
+        function selectCourse(c)   { state.course = c; state.view = 'semesters'; render(); }
+        function selectSemester(s) { state.semester = s; state.view = 'subjects'; render(); }
+        function selectSubject(s)  { state.subject = s; state.view = 'files'; render(); }
 
         function goBack() {
-            if (state.view === 'semesters') state.view = 'courses';
-            else if (state.view === 'subjects') state.view = 'semesters';
-            else if (state.view === 'files') state.view = 'subjects';
+            if (state.view === 'semesters') { state.view = 'courses'; }
+            else if (state.view === 'subjects') { state.view = 'semesters'; }
+            else if (state.view === 'files') { state.view = 'subjects'; }
             render();
         }
 
-        function openFileModal(file) {
-            const modal = document.getElementById('modal');
+        function openFileModal(group) {
             const content = document.getElementById('modal-content');
-
             content.innerHTML = `
                 <div class="mb-4">
-                    <span class="text-xs text-zinc-500 uppercase tracking-wider">${state.selectedSubject.name}</span>
-                    <h3 class="text-lg font-medium text-zinc-100 mt-1">${file.name}</h3>
+                    <span class="text-xs text-zinc-500 uppercase tracking-wider">${state.subject}</span>
+                    <h3 class="text-lg font-medium text-zinc-100 mt-1">${group.name}</h3>
                 </div>
-                <p class="text-xs text-zinc-400 mb-6">${file.desc} (Размер: ${file.size})</p>
+                <p class="text-xs text-zinc-400 mb-5">${group.desc || ''}</p>
                 <div class="space-y-2" id="modal-actions-container">
-                    <button onclick="showVariants('${file.id}')" class="w-full py-2.5 px-4 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-medium text-xs transition">Выбрать вариант</button>
-                    <button onclick="openTaskInfo('${file.id}')" class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">Ознакомиться с заданием</button>
-                </div>
-            `;
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
+                    <button onclick='showVariants(${JSON.stringify(group)})' class="w-full py-2.5 px-4 rounded-xl bg-zinc-100 hover:bg-white text-zinc-950 font-medium text-xs transition">Выбрать вариант</button>
+                </div>`;
+            document.getElementById('modal').classList.replace('hidden', 'flex');
         }
 
-        function showVariants(fileId) {
-            const file = state.selectedSubject.files.find(f => f.id == fileId);
+        function showVariants(group) {
             const container = document.getElementById('modal-actions-container');
-            if (!file || !Array.isArray(file.variants)) {
+            let html = `<div class="text-xs font-medium text-zinc-300 mb-2">Выберите вариант:</div><div class="space-y-2 max-h-48 overflow-y-auto pr-1">`;
+            group.variants.forEach(({ fileId, item }) => {
+                const actionText = item.type === 'free' ? 'Скачать бесплатно' : `Оплатить и скачать (${item.price} ₽)`;
+                html += `
+                    <div class="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/50 border border-zinc-800/65">
+                        <span class="text-xs text-zinc-200 font-medium">${item.variant}</span>
+                        <button onclick='handleAction("${fileId}", "${item.type}")' class="py-1.5 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] transition">${actionText}</button>
+                    </div>`;
+            });
+            html += `</div><button onclick='openFileModal(${JSON.stringify(group)})' class="w-full mt-3 py-2 px-4 rounded-xl bg-zinc-950 text-zinc-400 hover:text-zinc-200 text-xs transition">← Назад</button>`;
+            container.innerHTML = html;
+        }
+
+        async function handleAction(fileId, type) {
+            const chatId = getChatId();
+            if (!chatId) {
+                showToast('Откройте приложение через Telegram');
                 return;
             }
 
-            let variantsHtml = `<div class="text-xs font-medium text-zinc-300 mb-2">Выберите вариант:</div><div class="space-y-2 max-h-48 overflow-y-auto pr-1">`;
-            
-            file.variants.forEach(v => {
-                const actionText = v.type === 'free' ? 'Скачать бесплатно' : `Оплатить и скачать (${v.price})`;
-                variantsHtml += `
-                    <div class="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/50 border border-zinc-800/65">
-                        <span class="text-xs text-zinc-200 font-medium">${v.name}</span>
-                        <button onclick="handleVariantAction(${JSON.stringify(v)}, ${file.id})" class="py-1.5 px-3 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-[11px] transition">${actionText}</button>
-                    </div>
-                `;
-            });
-
-            variantsHtml += `</div><button onclick="openFileModal(${JSON.stringify(file).replace(/"/g, '&quot;')})" class="w-full mt-3 py-2 px-4 rounded-xl bg-zinc-950 text-zinc-400 hover:text-zinc-200 text-xs transition">← Назад</button>`;
-            container.innerHTML = variantsHtml;
-        }
-
-        function openTaskInfo(fileId) {
-            const file = state.selectedSubject.files.find(f => f.id == fileId);
-            const modal = document.getElementById('modal');
-            const content = document.getElementById('modal-content');
-            if (!file) return;
-
-            content.innerHTML = `
-                <div class="mb-4">
-                    <span class="text-xs text-zinc-500 uppercase tracking-wider">${state.selectedSubject.name}</span>
-                    <h3 class="text-lg font-medium text-zinc-100 mt-1">${file.name}</h3>
-                </div>
-                <div class="bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-4 mb-4 max-h-64 overflow-y-auto">
-                    <p class="text-sm text-zinc-300 leading-relaxed">${file.desc || 'Описание недоступно'}</p>
-                    <div class="mt-4 text-xs text-zinc-500">
-                        <p><strong>Предмет:</strong> ${state.selectedSubject.name}</p>
-                        <p><strong>Размер:</strong> ${file.size || 'неизвестно'}</p>
-                    </div>
-                </div>
-                <button onclick="openFileModal(${JSON.stringify(file).replace(/"/g, '&quot;')})" class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">Назад</button>
-            `;
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-        }
-
-        async function handleVariantAction(variant, fileId) {
-            const file = state.selectedSubject.files.find(f => f.id == fileId);
-            if (!file) return;
-
-            const payload = {
-                fileId: file.id + '_' + variant.id,
-                chatId: getChatId(),
-                variantId: variant.id,
-                variantName: variant.name,
-                type: variant.type
-            };
-
             try {
-                if (variant.type === 'free') {
-                    const response = await fetch(`${BACKEND_URL}/create-payment`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-
-                    const data = await response.json();
-                    if (data.freeUrl) {
-                        window.open(data.freeUrl, '_blank');
-                        closeModal();
-                        return;
-                    }
-
-                    throw new Error('Нет ссылки для бесплатного файла');
-                }
-
-                const response = await fetch(`${BACKEND_URL}/create-payment`, {
+                const res = await fetch(`${BACKEND_URL}/create-payment`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload)
+                    body: JSON.stringify({ fileId, chatId })
                 });
+                const data = await res.json();
 
-                const data = await response.json();
-                if (data.confirmation_url) {
-                    window.location.href = data.confirmation_url;
+                if (data.freeUrl) {
+                    window.open(data.freeUrl, '_blank');
+                    closeModal();
                     return;
                 }
-
                 if (data.paymentUrl) {
                     window.location.href = data.paymentUrl;
                     return;
                 }
-
-                throw new Error('Нет ссылки оплаты');
-            } catch (error) {
-                console.error(error);
-                showToast('Не удалось выполнить действие. Попробуйте ещё раз.');
+                throw new Error(data.error || 'Неизвестная ошибка');
+            } catch (e) {
+                showToast('Ошибка: ' + e.message);
             }
         }
 
-        function getChatId() {
-            const fromWebApp = window.Telegram && window.Telegram.WebApp && window.Telegram.WebApp.initDataUnsafe && window.Telegram.WebApp.initDataUnsafe.user;
-            if (fromWebApp && fromWebApp.id) return String(fromWebApp.id);
-            return '12345678';
-        }
-
-        function showToast(message) {
-            const toast = document.createElement('div');
-            toast.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs px-4 py-2 rounded-xl shadow-lg z-[100]';
-            toast.innerText = message;
-            document.body.appendChild(toast);
-            setTimeout(() => toast.remove(), 2500);
+        function showToast(msg) {
+            const t = document.createElement('div');
+            t.className = 'fixed bottom-4 left-1/2 -translate-x-1/2 bg-zinc-900 border border-zinc-800 text-zinc-200 text-xs px-4 py-2 rounded-xl shadow-lg z-[100]';
+            t.innerText = msg;
+            document.body.appendChild(t);
+            setTimeout(() => t.remove(), 2500);
         }
 
         function closeModal() {
-            const modal = document.getElementById('modal');
-            modal.classList.remove('flex');
-            modal.classList.add('hidden');
+            document.getElementById('modal').classList.replace('flex', 'hidden');
         }
-
         function openSupportModal() {
-            const supportModal = document.getElementById('support-modal');
-            supportModal.classList.remove('hidden');
-            supportModal.classList.add('flex');
+            document.getElementById('support-modal').classList.replace('hidden', 'flex');
         }
-
         function closeSupportModal() {
-            const supportModal = document.getElementById('support-modal');
-            supportModal.classList.remove('flex');
-            supportModal.classList.add('hidden');
+            document.getElementById('support-modal').classList.replace('flex', 'hidden');
         }
 
-        function sendSupportMessage(event) {
-            event.preventDefault();
+        function sendSupportMessage(e) {
+            e.preventDefault();
             const input = document.getElementById('chat-input');
-            const messagesContainer = document.getElementById('chat-messages');
-            const userText = input.value.trim();
-            if(!userText) return;
-
-            const userMsgDiv = document.createElement('div');
-            userMsgDiv.className = 'bg-zinc-800 text-zinc-100 p-3 rounded-xl max-w-[85%] ml-auto text-right';
-            userMsgDiv.textContent = userText;
-            messagesContainer.appendChild(userMsgDiv);
-
+            const msgs = document.getElementById('chat-messages');
+            const text = input.value.trim();
+            if (!text) return;
+            const d = document.createElement('div');
+            d.className = 'bg-zinc-800 text-zinc-100 p-3 rounded-xl max-w-[85%] ml-auto text-right text-xs';
+            d.textContent = text;
+            msgs.appendChild(d);
             input.value = '';
-            messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
+            msgs.scrollTop = msgs.scrollHeight;
             setTimeout(() => {
-                const adminMsgDiv = document.createElement('div');
-                adminMsgDiv.className = 'bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-zinc-300 max-w-[85%]';
-                adminMsgDiv.textContent = 'Сообщение отправлено администратору на почту! Мы свяжемся с вами в течение 10-15 минут.';
-                messagesContainer.appendChild(adminMsgDiv);
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                const r = document.createElement('div');
+                r.className = 'bg-zinc-900 border border-zinc-800 p-3 rounded-xl text-zinc-300 max-w-[85%] text-xs';
+                r.textContent = 'Сообщение отправлено! Мы свяжемся с вами в течение 10-15 минут.';
+                msgs.appendChild(r);
+                msgs.scrollTop = msgs.scrollHeight;
             }, 1000);
         }
 
-        loadCatalogPrices();
+        // Экранирование для onclick-атрибутов
+        function esc(s) { return s.replace(/'/g, "\\'"); }
+
+        init();
     </script>
 </body>
 </html>

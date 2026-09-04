@@ -23,16 +23,26 @@ if (!process.env.BOT_TOKEN) {
 let bot;
 if (process.env.TELEGRAM_WEBHOOK_URL) {
     bot = new TelegramBot(process.env.BOT_TOKEN);
-    bot.setWebHook(process.env.TELEGRAM_WEBHOOK_URL).catch(err => console.error('setWebHook error', err));
-    console.log('Telegram bot configured in webhook mode');
+    bot.setWebHook(process.env.TELEGRAM_WEBHOOK_URL)
+        .then(() => console.log('Telegram webhook set:', process.env.TELEGRAM_WEBHOOK_URL))
+        .catch(err => {
+            console.error('setWebHook error:', err.message);
+            process.exit(1);
+        });
 } else {
     bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
     console.log('Telegram bot running in polling mode');
 }
 
 const YOOKASSA_API_URL = 'https://api.yookassa.ru/v3';
-const YOO_SHOP_ID = process.env.YOO_SHOP_ID || process.env.YOOKASSA_SHOP_ID || '';
-const YOO_SECRET_KEY = process.env.YOO_SECRET_KEY || process.env.YOOKASSA_SECRET_KEY || process.env.YOO_SECRET || '';
+const YOO_SHOP_ID = process.env.YOO_SHOP_ID || '';
+const YOO_SECRET_KEY = process.env.YOO_SECRET_KEY || '';
+const DOWNLOAD_SECRET = process.env.YOO_SECRET;
+
+if (!DOWNLOAD_SECRET) {
+    console.error('ERROR: YOO_SECRET not set — download tokens will be insecure');
+    process.exit(1);
+}
 
 // Создание платежа через YooKassa API
 app.post('/create-payment', async (req, res) => {
@@ -92,11 +102,6 @@ app.post('/create-payment', async (req, res) => {
     }
 });
 
-// Отдать каталог в JSON (публично доступно)
-app.get('/catalog', (req, res) => {
-    res.json(catalog);
-});
-
 // Отдать статическую страницу (index.html) для Telegram Web App / браузера
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -153,8 +158,22 @@ function isTokenUsed(token) {
     return used.includes(token);
 }
 
+// Верификация YooKassa webhook через Basic Auth
+function verifyYooKassaAuth(req) {
+    const auth = req.headers['authorization'] || '';
+    if (!auth.startsWith('Basic ')) return false;
+    const decoded = Buffer.from(auth.slice(6), 'base64').toString('utf8');
+    const [shopId, secret] = decoded.split(':');
+    return shopId === YOO_SHOP_ID && secret === YOO_SECRET_KEY;
+}
+
 // Вебхук от YooKassa при успешной оплате
 app.post('/webhook', (req, res) => {
+    if (!verifyYooKassaAuth(req)) {
+        console.warn('Webhook: unauthorized request from', req.ip);
+        return res.status(401).send('Unauthorized');
+    }
+
     const event = req.body;
 
     if (!event || event.type !== 'notification' || event.event !== 'payment.succeeded') {
@@ -177,7 +196,7 @@ app.post('/webhook', (req, res) => {
     const expiresSec = parseInt(process.env.DOWNLOAD_TOKEN_TTL || '900', 10);
     const expiresAt = Math.floor(Date.now() / 1000) + expiresSec;
     const payload = `${fileId}|${chatId}|${expiresAt}`;
-    const hmac = crypto.createHmac('sha256', process.env.YOO_SECRET || 'secret').update(payload).digest('hex');
+    const hmac = crypto.createHmac('sha256', DOWNLOAD_SECRET).update(payload).digest('hex');
     const token = Buffer.from(payload).toString('base64') + '.' + hmac;
 
     const appUrl = process.env.APP_URL || '';
@@ -208,7 +227,7 @@ app.get('/download/:token', async (req, res) => {
         if (!b64 || !hmac) return res.status(400).send('Bad token');
 
         const payload = Buffer.from(b64, 'base64').toString('utf8');
-        const expected = crypto.createHmac('sha256', process.env.YOO_SECRET || 'secret').update(payload).digest('hex');
+        const expected = crypto.createHmac('sha256', DOWNLOAD_SECRET).update(payload).digest('hex');
         if (!crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(hmac))) return res.status(403).send('Invalid token');
 
         const [fileId, chatId, expiresAtStr] = payload.split('|');
@@ -231,7 +250,9 @@ app.get('/download/:token', async (req, res) => {
         }
 
         const contentType = response.headers.get('content-type') || 'application/octet-stream';
-        const contentDisposition = `attachment; filename="${encodeURIComponent(item.name || 'file')}.bin"`;
+        // Берём имя файла из Google Drive если есть, иначе из каталога
+        const driveDisposition = response.headers.get('content-disposition');
+        const contentDisposition = driveDisposition || `attachment; filename="${encodeURIComponent(item.name || 'file')}"`;
 
         res.setHeader('Content-Type', contentType);
         res.setHeader('Content-Disposition', contentDisposition);
