@@ -55,9 +55,16 @@ app.post('/create-payment', async (req, res) => {
     const item = catalog[fileId];
     if (!item) return res.status(404).json({ error: 'Товар не найден' });
 
-    // Если файл бесплатный, сразу отдаем ссылку на скачивание
+    // Если файл бесплатный — генерируем временный токен так же как для платных
     if (item.type === 'free') {
-        return res.json({ freeUrl: item.fileUrl });
+        const expiresSec = parseInt(process.env.DOWNLOAD_TOKEN_TTL || '900', 10);
+        const expiresAt = Math.floor(Date.now() / 1000) + expiresSec;
+        const payload = `${fileId}|${chatId || 'free'}|${expiresAt}`;
+        const hmac = crypto.createHmac('sha256', DOWNLOAD_SECRET).update(payload).digest('hex');
+        const token = Buffer.from(payload).toString('base64') + '.' + hmac;
+        const appUrl = process.env.APP_URL || '';
+        const downloadLink = `${appUrl}/download/${encodeURIComponent(token)}`;
+        return res.json({ freeUrl: downloadLink });
     }
 
     if (!YOO_SHOP_ID || !YOO_SECRET_KEY) {
@@ -69,6 +76,7 @@ app.post('/create-payment', async (req, res) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'Idempotence-Key': crypto.randomUUID(),
                 'Authorization': 'Basic ' + Buffer.from(`${YOO_SHOP_ID}:${YOO_SECRET_KEY}`).toString('base64')
             },
             body: JSON.stringify({
