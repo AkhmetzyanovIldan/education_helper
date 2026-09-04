@@ -35,9 +35,14 @@ if (process.env.TELEGRAM_WEBHOOK_URL) {
 }
 
 const YOOKASSA_API_URL = 'https://api.yookassa.ru/v3';
-const YOO_SHOP_ID = process.env.YOO_SHOP_ID || '';
-const YOO_SECRET_KEY = process.env.YOO_SECRET_KEY || '';
-const DOWNLOAD_SECRET = process.env.YOO_SECRET;
+const YOO_SHOP_ID = process.env.YOOKASSA_SHOP_ID || '';
+const YOO_SECRET_KEY = process.env.YOOKASSA_SECRET_KEY || '';
+const DOWNLOAD_SECRET = process.env.YOOKASSA_SECRET;
+
+if (!DOWNLOAD_SECRET) {
+    console.error('ERROR: YOOKASSA_SECRET not set');
+    process.exit(1);
+}
 
 if (!DOWNLOAD_SECRET) {
     console.error('ERROR: YOO_SECRET not set — download tokens will be insecure');
