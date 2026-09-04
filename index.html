@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Помощник нефтяник РФ</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <link rel="stylesheet" href="/tailwind.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
 </head>
@@ -289,8 +288,8 @@
 
         async function handleAction(fileId, type) {
             const chatId = getChatId();
-            if (!chatId) {
-                showToast('Откройте приложение через Telegram');
+            if (!chatId && type === 'paid') {
+                showToast('Для оплаты откройте приложение через Telegram');
                 return;
             }
 
@@ -303,7 +302,11 @@
                 const data = await res.json();
 
                 if (data.freeUrl) {
-                    window.location.href = data.freeUrl;
+                    if (window.Telegram?.WebApp?.openLink) {
+                        window.Telegram.WebApp.openLink(data.freeUrl);
+                    } else {
+                        window.location.href = data.freeUrl;
+                    }
                     closeModal();
                     return;
                 }
