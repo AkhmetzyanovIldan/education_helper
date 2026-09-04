@@ -255,5 +255,10 @@ app.post('/telegram-webhook', (req, res) => {
     }
 });
 
+// API endpoint для получения каталога (для фронтенда)
+app.get('/api/catalog', (req, res) => {
+    res.json(catalog);
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

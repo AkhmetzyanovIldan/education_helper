@@ -206,6 +206,39 @@
         const navActions = document.getElementById('nav-actions');
         const BACKEND_URL = window.location.origin || 'http://localhost:3000';
 
+        // Функция для загрузки каталога и обновления цен
+        async function loadCatalogPrices() {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/catalog`);
+                const catalog = await response.json();
+                
+                // Обновляем цены в db на основе каталога
+                db.courses.forEach(course => {
+                    course.semesters.forEach(semester => {
+                        semester.subjects.forEach(subject => {
+                            subject.files.forEach(file => {
+                                file.variants.forEach(variant => {
+                                    const catalogKey = file.id + '_' + variant.id;
+                                    const catalogItem = catalog[catalogKey];
+                                    if (catalogItem) {
+                                        variant.type = catalogItem.type;
+                                        if (catalogItem.type === 'paid') {
+                                            variant.price = catalogItem.price + ' ₽';
+                                        }
+                                    }
+                                });
+                            });
+                        });
+                    });
+                });
+                
+                render();
+            } catch (error) {
+                console.error('Failed to load catalog prices:', error);
+                render();
+            }
+        }
+
         function render() {
             appView.innerHTML = '';
             navActions.innerHTML = '';
@@ -518,7 +551,7 @@
             }, 1000);
         }
 
-        render();
+        loadCatalogPrices();
     </script>
 </body>
 </html>
