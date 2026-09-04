@@ -413,7 +413,7 @@
             if (!file) return;
 
             const payload = {
-                fileId: file.id,
+                fileId: file.id + '_' + variant.id,
                 chatId: getChatId(),
                 variantId: variant.id,
                 variantName: variant.name,
