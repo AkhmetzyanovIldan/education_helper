@@ -1,17 +1,6 @@
 #!/usr/bin/env node
-
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-
-const publicDir = path.join(__dirname, 'public');
-if (!fs.existsSync(publicDir)) {
-    fs.mkdirSync(publicDir, { recursive: true });
-}
-
-console.log('Компилирую Tailwind CSS...');
-execSync(
-    'npx tailwindcss@3 -i ./src/input.css -o ./public/tailwind.css --minify',
-    { stdio: 'inherit' }
-);
-console.log('✓ CSS скомпилирован в public/tailwind.css');
+'use strict';
+const { spawnSync } = require('node:child_process');
+const path = require('node:path');
+const result = spawnSync(process.execPath, [require.resolve('tailwindcss/lib/cli.js'), '-i', './src/input.css', '-o', './public/tailwind.css', '--minify'], { cwd: __dirname, stdio: 'inherit' });
+process.exit(result.status ?? 1);

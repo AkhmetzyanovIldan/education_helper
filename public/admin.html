@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Админка — Помощник нефтяник РФ</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<link rel="stylesheet" href="/admin.css">
+<script src="/admin.js" defer></script>
+</head>
+<body><main>
+<header><h1>Управление материалами</h1><a href="/">Каталог студента →</a></header>
+<p id="status" role="status">Проверяем доступ владельца…</p>
+<div id="panel" hidden>
+<nav><button id="refresh" type="button">Обновить</button><button id="new" type="button">Новый материал</button></nav>
+<section><h2>Материалы</h2><p>Отправьте документ в чат с ботом, затем нажмите «Обновить». Файл появится в списках ниже. Фото отправляйте как файл.</p>
+<select id="materials" aria-label="Материал"></select>
+<form id="editor">
+<label>ID материала<input name="id" required pattern="[A-Za-z0-9_-]{1,80}" maxlength="80"></label>
+<div class="grid">
+<label>Курс<input name="course" required maxlength="200"></label>
+<label>Семестр<input name="semester" required maxlength="200"></label>
+<label>Предмет<input name="subject" required maxlength="200"></label>
+<label>Название работы<input name="name" required maxlength="200"></label>
+<label>Вариант<input name="variant" required maxlength="200"></label>
+<label>Доступ<select name="type"><option value="free">Бесплатно</option><option value="paid">Платно</option></select></label>
+</div>
+<label>Описание задания<textarea name="desc" rows="4" maxlength="3000"></textarea></label>
+<label>Цена в Stars (пусто = оплата отключена)<input name="priceStars" type="number" min="1" max="100000" step="1"></label>
+<label>Файл решения<select name="telegramFileId"></select></label>
+<label>Файл задания (пусто = показывать описание)<select name="taskTelegramFileId"></select></label>
+<label class="check"><input name="disabled" type="checkbox"> Временно отключить выдачу и оплату</label>
+<button type="submit">Сохранить материал</button>
+</form></section>
+<section><h2>Последние 100 заказов</h2><p>Возврат возвращает Stars полностью. Уже полученный документ из устройства студента удалить нельзя.</p><div id="orders"></div></section>
+<section><h2>Поддержка</h2><p>Вопросы студентов приходят в ваш личный чат с ботом. Нажмите «Ответить» на вопрос и отправьте текст — бот передаст его студенту.</p></section>
+</div></main></body></html>

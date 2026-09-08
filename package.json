@@ -1,19 +1,25 @@
 {
   "name": "education-helper-bot",
   "version": "1.0.0",
-  "description": "Telegram Web App + bot для выдачи учебных материалов с оплатой через ЮMoney",
+  "description": "Telegram Mini App: учебные материалы, Telegram Stars и выдача документов ботом",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build:css": "node build-css.js"
+    "build:css": "tailwindcss -i ./src/input.css -o ./public/tailwind.css --minify",
+    "test": "node --test",
+    "check": "node --check server.js && node --check src/app.js && node --check src/store.js && node --check public/app.js && node --check src/security.js && node --check src/telegram.js && node --check src/worker.js && node --check public/admin.js"
   },
   "engines": {
-    "node": ">=16"
+    "node": ">=22"
   },
   "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.0.0",
-    "express": "^4.18.2",
-    "node-telegram-bot-api": "^0.61.0"
+    "dotenv": "^16.6.1",
+    "express": "^5.2.1",
+    "pg": "^8.23.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "jsdom": "^29.1.1",
+    "tailwindcss": "^3.4.17"
   }
 }
