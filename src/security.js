@@ -22,17 +22,19 @@ function verifyInitData(raw, token, now = Math.floor(Date.now() / 1000)) {
     return user;
 }
 const validFile = value => typeof value === 'string' && /^[A-Za-z0-9_-]{10,512}$/.test(value);
-function publicCatalog(catalog) {
+function publicCatalog(catalog, provider = 'stars') {
     return Object.fromEntries(Object.entries(catalog).map(([id, item]) => [id, {
         course: item.course, semester: item.semester, subject: item.subject,
         name: item.name, variant: item.variant, desc: item.desc, type: item.type,
+        paymentProvider: provider,
+        priceRub: Number.isSafeInteger(item.priceRub) && item.priceRub > 0 ? item.priceRub : null,
         priceStars: Number.isSafeInteger(item.priceStars) && item.priceStars > 0 ? item.priceStars : null,
-        available: !item.disabled && validFile(item.telegramFileId) && (item.type === 'free' || (Number.isSafeInteger(item.priceStars) && item.priceStars > 0)),
+        available: !item.disabled && validFile(item.telegramFileId) && (item.type === 'free' || (provider === 'yookassa' ? Number.isSafeInteger(item.priceRub) && item.priceRub > 0 : Number.isSafeInteger(item.priceStars) && item.priceStars > 0)),
         hasTaskFile: validFile(item.taskTelegramFileId)
     }]));
 }
 function paymentMatches(order, payment, userId) {
-    return Boolean(order && String(order.user_id) === String(userId) && payment.currency === 'XTR'
+    return Boolean(order && order.provider === 'stars' && order.currency === 'XTR' && String(order.user_id) === String(userId) && payment.currency === 'XTR'
         && order.amount === payment.total_amount && order.id === payment.invoice_payload && order.amount > 0);
 }
 module.exports = { sameSecret, verifyInitData, validFile, publicCatalog, paymentMatches };

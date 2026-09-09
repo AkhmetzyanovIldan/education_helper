@@ -135,9 +135,9 @@
 
             Object.values(groups).forEach(group => {
                 const hasPaid = group.variants.some(v => v.item.type === 'paid');
-                const minPrice = hasPaid ? Math.min(...group.variants.filter(v => v.item.type === 'paid').map(v => v.item.priceStars).filter(Number.isInteger)) : 0;
+                const minPrice = hasPaid ? Math.min(...group.variants.filter(v => v.item.type === 'paid').map(v => v.item.paymentProvider === 'yookassa' ? v.item.priceRub : v.item.priceStars).filter(Number.isInteger)) : 0;
                 const badge = hasPaid
-                    ? `<span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">${Number.isFinite(minPrice) ? "от " + minPrice + " ★" : "Скоро"}</span>`
+                    ? `<span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">${Number.isFinite(minPrice) ? "от " + minPrice + (group.variants[0].item.paymentProvider === "yookassa" ? " ₽" : " ★") : "Скоро"}</span>`
                     : `<span class="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded bg-zinc-800 text-zinc-300">Бесплатно</span>`;
 
                 html += `
@@ -179,9 +179,9 @@
             document.getElementById('modal').classList.replace('hidden', 'flex');
         }
 
-        function openTaskInfo(group) {
+        function openTaskInfo(group, button) {
             const preview = group.variants.find(v => v.item.hasTaskFile);
-            if (preview) { handleAction(preview.fileId, true); return; }
+            if (preview) { handleAction(preview.fileId, true, button); return; }
             const content = document.getElementById('modal-content');
             content.innerHTML = `
                 <div class="mb-4">
@@ -202,7 +202,7 @@
             const container = document.getElementById('modal-actions-container');
             let html = `<div class="text-xs font-medium text-zinc-300 mb-2">Выберите вариант:</div><div class="space-y-2 max-h-48 overflow-y-auto pr-1">`;
             group.variants.forEach(({ fileId, item }) => {
-                const actionText = !item.available ? 'Скоро' : item.type === 'free' ? 'Получить бесплатно' : `Оплатить и получить (${item.priceStars} ★)`;
+                const actionText = !item.available ? 'Скоро' : item.type === 'free' ? 'Получить бесплатно' : `Оплатить и получить (${item.paymentProvider === "yookassa" ? item.priceRub + " ₽" : item.priceStars + " ★"})`;
                 html += `
                     <div class="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/50 border border-zinc-800/65">
                         <span class="text-xs text-zinc-200 font-medium">${escapeHtml(item.variant)}</span>
@@ -214,7 +214,38 @@
         }
 
         const requests = new Map();
+        const accepted = new Map();
         let busy = false;
+        let feedbackFocus;
+        function feedback(title, description, pending = false, error = false) {
+            let panel = document.getElementById('delivery-feedback');
+            if (!panel) {
+                panel = document.createElement('div');
+                panel.id = 'delivery-feedback';
+                panel.className = 'delivery-overlay';
+                panel.setAttribute('role','dialog');
+                panel.setAttribute('aria-modal','true');
+                panel.setAttribute('aria-labelledby','delivery-title');
+                panel.innerHTML = '<div class="delivery-card"><div class="delivery-icon" aria-hidden="true"></div><h2 id="delivery-title"></h2><p id="delivery-description" role="status" aria-live="polite"></p><button type="button" data-action="dismissFeedback">Понятно</button></div>';
+                document.body.append(panel);
+            }
+            panel.hidden = false;
+            panel.dataset.pending = String(pending);
+            panel.dataset.error = String(error);
+            panel.querySelector('.delivery-icon').textContent = pending ? '…' : error ? '!' : '✓';
+            panel.querySelector('h2').textContent = title;
+            panel.querySelector('p').textContent = description;
+            const dismiss = panel.querySelector('button');
+            dismiss.disabled = pending;
+            dismiss.textContent = pending ? 'Подождите…' : 'Понятно';
+            dismiss.focus();
+        }
+        function dismissFeedback() {
+            if (busy) return;
+            const panel = document.getElementById('delivery-feedback');
+            if (panel) panel.hidden = true;
+            if (feedbackFocus?.isConnected) feedbackFocus.focus();
+        }
         async function api(path, body) {
             const initData = window.Telegram?.WebApp?.initData;
             if (!initData) throw new Error('Откройте приложение через Telegram.');
@@ -228,10 +259,24 @@
             if (!response.ok) throw Object.assign(new Error(data.error || 'Не удалось выполнить запрос.'), { status: response.status });
             return data;
         }
-        async function handleAction(fileId, preview = false) {
+        async function handleAction(fileId, preview = false, button) {
             if (busy) return;
-            busy = true;
             const key = fileId + ':' + preview;
+            if ((accepted.get(key) || 0) > Date.now()) {
+                feedback('Файл уже запрошен', 'Он придёт документом в чат с ботом. Повторно нажимать кнопку не нужно.');
+                return;
+            }
+            busy = true;
+            feedbackFocus = button || document.activeElement;
+            const originalText = button?.textContent;
+            if (button) {
+                button.disabled = true;
+                button.classList.add('delivery-working');
+                button.setAttribute('aria-busy','true');
+                button.textContent = 'Обрабатываем…';
+            }
+            feedback('Обрабатываем запрос', 'Связываемся с сервером. Пожалуйста, подождите — повторно нажимать кнопку не нужно.', true);
+            let queued = false;
             try {
                 const tg = window.Telegram?.WebApp;
                 if (!tg?.initData) throw new Error('Откройте приложение через Telegram.');
@@ -242,25 +287,51 @@
                 if (!requests.has(key)) requests.set(key, crypto.randomUUID());
                 const data = await api('/action', { fileId, preview, requestKey: requests.get(key) });
                 if (data.queued) {
-                    requests.delete(key);
-                    showToast('Документ поставлен в очередь. Он придёт в чат с ботом.');
-                    closeModal();
+                    queued = true;
+                    feedback('Файл придёт в чат с ботом', 'Запрос сохранён. Откройте чат с ботом и дождитесь документа. Это может занять немного времени.');
+                } else if (data.paymentUrl) {
+                    feedback('Переходим к оплате', 'Оплатите на странице ЮKassa. Затем нажмите «Вернуться в магазин», чтобы открыть чат бота. Файл придёт автоматически после подтверждения оплаты.');
+                    tg.openLink(data.paymentUrl);
                 } else if (data.invoiceUrl) {
                     if (!tg.isVersionAtLeast?.('6.1')) throw new Error('Обновите Telegram для оплаты.');
-                    await new Promise(resolve => tg.openInvoice(data.invoiceUrl, status => {
-                        if (status === 'paid') {
-                            requests.delete(key);
-                            showToast('Оплата завершена. Документ придёт в чат с ботом.');
-                            closeModal();
-                        } else if (status === 'pending') showToast('Платёж обрабатывается. Дождитесь сообщения бота.');
-                        else showToast(status === 'cancelled' ? 'Оплата отменена.' : 'Оплата не завершена. Повторите попытку.');
-                        resolve();
-                    }));
-                }
+                    feedback('Открываем оплату', 'Завершите оплату в окне Telegram. После подтверждения файл придёт в чат.', true);
+                    const status = await new Promise(resolve => tg.openInvoice(data.invoiceUrl, resolve));
+                    if (status === 'paid') {
+                        queued = true;
+                        feedback('Оплата завершена', 'Файл придёт документом в чат с ботом после подтверждения платежа сервером. Повторно платить не нужно.');
+                    } else if (status === 'pending') {
+                        feedback('Платёж обрабатывается', 'Дождитесь подтверждения Telegram и документа в чате с ботом. Не оплачивайте этот материал повторно.');
+                    } else {
+                        feedback(status === 'cancelled' ? 'Оплата отменена' : 'Оплата не завершена', 'Можно вернуться к материалу и попробовать снова.', false, status !== 'cancelled');
+                    }
+                } else throw new Error('Сервер не подтвердил запрос. Повторите попытку.');
             } catch (e) {
                 if (e.status === 409) requests.delete(key);
-                showToast(e.name === 'TimeoutError' ? 'Сервер отвечает долго. Повторите запрос — заказ сохранён.' : e.message);
-            } finally { busy = false; }
+                feedback('Не удалось подтвердить запрос', e.name === 'TimeoutError'
+                    ? 'Сервер отвечает долго. Проверьте чат с ботом. Если файла нет, повторите запрос — используется тот же номер запроса.'
+                    : e.message, false, true);
+            } finally {
+                busy = false;
+                if (queued) {
+                    accepted.set(key, Date.now() + 60000);
+                    setTimeout(() => {
+                        accepted.delete(key);
+                        requests.delete(key);
+                        if (button?.isConnected) {
+                            button.disabled = false;
+                            button.textContent = originalText;
+                            button.classList.remove('delivery-working');
+                        }
+                    }, 60000);
+                }
+                if (button) {
+                    button.removeAttribute('aria-busy');
+                    button.textContent = queued ? '✓ Файл запрошен' : originalText;
+                    button.disabled = queued;
+                    if (!queued) button.classList.remove('delivery-working');
+                }
+                document.querySelector('#delivery-feedback button')?.focus();
+            }
         }
 
         function showToast(msg) {
@@ -313,14 +384,14 @@
         function actionAttr(action, value) {
             return 'data-action="' + action + '" data-value="' + escapeHtml(JSON.stringify(value)) + '"';
         }
-        const actions = { selectCourse, selectSemester, selectSubject, openFileModal, openTaskInfo, showVariants, handleAction, goBack, openSupportModal, closeSupportModal, closeModal };
+        const actions = { selectCourse, selectSemester, selectSubject, openFileModal, openTaskInfo, showVariants, handleAction: (id, button) => handleAction(id, false, button), dismissFeedback, goBack, openSupportModal, closeSupportModal, closeModal };
         document.addEventListener('click', event => {
             const button = event.target.closest('[data-action]');
             if (!button || button.disabled || !Object.hasOwn(actions, button.dataset.action)) return;
-            actions[button.dataset.action](button.dataset.value ? JSON.parse(button.dataset.value) : undefined);
+            actions[button.dataset.action](button.dataset.value ? JSON.parse(button.dataset.value) : undefined, button);
         });
         document.getElementById('chat-form').addEventListener('submit', sendSupportMessage);
-        document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeModal(); closeSupportModal(); } });
+        document.addEventListener('keydown', event => { const panel = document.getElementById('delivery-feedback'); if (panel && !panel.hidden) { if (event.key === 'Escape') dismissFeedback(); if (event.key === 'Tab') { event.preventDefault(); panel.querySelector('button').focus(); } return; } if (event.key === 'Escape') { closeModal(); closeSupportModal(); } });
         window.Telegram?.WebApp?.ready();
         window.Telegram?.WebApp?.expand();
         init();

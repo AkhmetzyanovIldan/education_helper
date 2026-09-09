@@ -7,7 +7,7 @@
     "start": "node server.js",
     "build:css": "tailwindcss -i ./src/input.css -o ./public/tailwind.css --minify",
     "test": "node --test",
-    "check": "node --check server.js && node --check src/app.js && node --check src/store.js && node --check public/app.js && node --check src/security.js && node --check src/telegram.js && node --check src/worker.js && node --check public/admin.js"
+    "check": "node --check server.js && node --check src/app.js && node --check src/store.js && node --check public/app.js && node --check src/security.js && node --check src/telegram.js && node --check src/worker.js && node --check public/admin.js && node --check src/yookassa.js"
   },
   "engines": {
     "node": ">=22"

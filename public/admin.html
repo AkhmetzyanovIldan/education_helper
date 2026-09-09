@@ -26,11 +26,16 @@
 </div>
 <label>Описание задания<textarea name="desc" rows="4" maxlength="3000"></textarea></label>
 <label>Цена в Stars (пусто = оплата отключена)<input name="priceStars" type="number" min="1" max="100000" step="1"></label>
+<label>Цена в рублях для ЮKassa (пусто = оплата отключена)<input name="priceRub" type="number" min="1" max="100000" step="1"></label>
 <label>Файл решения<select name="telegramFileId"></select></label>
 <label>Файл задания (пусто = показывать описание)<select name="taskTelegramFileId"></select></label>
 <label class="check"><input name="disabled" type="checkbox"> Временно отключить выдачу и оплату</label>
 <button type="submit">Сохранить материал</button>
 </form></section>
-<section><h2>Последние 100 заказов</h2><p>Возврат возвращает Stars полностью. Уже полученный документ из устройства студента удалить нельзя.</p><div id="orders"></div></section>
+<section><h2>Библиотека файлов</h2><p id="storage-group"></p>
+<label>Поиск по имени или папке<input id="files-search" type="search" maxlength="200" placeholder="Например: математика"></label>
+<button id="files-search-button" type="button">Найти</button>
+<div id="file-library"></div><nav><button id="files-prev" type="button">← Назад</button><span id="files-page"></span><button id="files-next" type="button">Далее →</button></nav></section>
+<section><h2>Последние 100 заказов</h2><p>Возврат возвращает полную сумму через исходный способ оплаты. Уже полученный документ из устройства студента удалить нельзя.</p><div id="orders"></div></section>
 <section><h2>Поддержка</h2><p>Вопросы студентов приходят в ваш личный чат с ботом. Нажмите «Ответить» на вопрос и отправьте текст — бот передаст его студенту.</p></section>
 </div></main></body></html>

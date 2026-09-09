@@ -33,7 +33,7 @@ test('admin edits material fields and sends explicit Stars prices through authen
     const calls=[];
     w.fetch=async(url,options)=>{
         calls.push({url,options});
-        return {ok:true,status:200,json:async()=>url.endsWith('/catalog')?{items:{a:item},uploads:[{file_id:'file_id_123456',name:'пример.docx'}]}:url.endsWith('/orders')?[]:{saved:true}};
+        return {ok:true,status:200,json:async()=>url.endsWith('/catalog')?{items:{a:item},uploads:[{file_id:'file_id_123456',name:'пример.docx'}]}:url.endsWith('/orders')?[]:url.includes('/uploads?')?{uploads:[],storageGroup:null}:{saved:true}};
     };
     w.eval(fs.readFileSync(path.join(__dirname,'../public/admin.js'),'utf8'));
     await tick();await tick();
@@ -49,5 +49,53 @@ test('admin edits material fields and sends explicit Stars prices through authen
     assert.ok(put);
     assert.equal(JSON.parse(put.options.body).priceStars,42);
     assert.equal(put.options.headers['X-Telegram-Init-Data'],'signed-test');
+    dom.window.close();
+});
+test('download shows immediate feedback, blocks repeat clicks and keeps confirmation visible',async()=>{
+    const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{url:'https://example.test',runScripts:'outside-only'});
+    const w=dom.window;
+    w.Telegram={WebApp:{initData:'signed',ready(){},expand(){},isVersionAtLeast:()=>false}};
+    const item={course:'1',semester:'1',subject:'Math',name:'Work',variant:'1',desc:'Task',type:'free',available:true};
+    let complete, count=0;
+    w.fetch=async url=>{
+        if(url.endsWith('/catalog')) return {ok:true,json:async()=>({a:item})};
+        count++;return new Promise(resolve=>{complete=()=>resolve({ok:true,json:async()=>({queued:true,orderId:'order'})});});
+    };
+    w.eval(fs.readFileSync(path.join(__dirname,'../public/app.js'),'utf8'));await tick();
+    for(const name of ['selectCourse','selectSemester','selectSubject','openFileModal','showVariants']) w.document.querySelector('[data-action="'+name+'"]').click();
+    const button=w.document.querySelector('[data-action="handleAction"]');
+    button.click();
+    assert.equal(button.disabled,true);
+    assert.equal(button.getAttribute('aria-busy'),'true');
+    assert.equal(button.classList.contains('delivery-working'),true);
+    assert.equal(w.document.getElementById('delivery-feedback').hidden,false);
+    button.click();assert.equal(count,1);
+    complete();await tick();
+    assert.match(w.document.getElementById('delivery-title').textContent,/Файл придёт/);
+    assert.equal(button.textContent,'✓ Файл запрошен');
+    assert.equal(w.document.querySelector('#delivery-feedback button').disabled,false);
+    w.document.querySelector('#delivery-feedback button').click();
+    assert.equal(w.document.getElementById('delivery-feedback').hidden,true);
+    dom.window.close();
+});
+test('failed download restores button and reuses request key on retry',async()=>{
+    const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{url:'https://example.test',runScripts:'outside-only'});
+    const w=dom.window;
+    w.Telegram={WebApp:{initData:'signed',ready(){},expand(){},isVersionAtLeast:()=>false}};
+    const item={course:'1',semester:'1',subject:'Math',name:'Work',variant:'1',desc:'Task',type:'free',available:true};
+    const keys=[];
+    w.fetch=async(url,options)=>{
+        if(url.endsWith('/catalog'))return {ok:true,json:async()=>({a:item})};
+        keys.push(JSON.parse(options.body).requestKey);throw new Error('Network error');
+    };
+    w.eval(fs.readFileSync(path.join(__dirname,'../public/app.js'),'utf8'));await tick();
+    for(const name of ['selectCourse','selectSemester','selectSubject','openFileModal','showVariants'])w.document.querySelector('[data-action="'+name+'"]').click();
+    const button=w.document.querySelector('[data-action="handleAction"]');
+    button.click();await tick();
+    assert.equal(button.disabled,false);assert.equal(button.getAttribute('aria-busy'),null);
+    assert.match(w.document.getElementById('delivery-title').textContent,/Не удалось/);
+    w.document.querySelector('#delivery-feedback button').click();
+    button.click();await tick();
+    assert.equal(keys.length,2);assert.equal(keys[0],keys[1]);
     dom.window.close();
 });

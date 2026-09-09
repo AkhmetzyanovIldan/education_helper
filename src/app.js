@@ -2,8 +2,28 @@
 const express = require('express');
 const path = require('node:path');
 const { sameSecret, verifyInitData, validFile, publicCatalog, paymentMatches } = require('./security');
+const { yookassaClient, amountRub, matches: yooMatches } = require('./yookassa');
 const wrap = fn => (req,res,next) => Promise.resolve().then(() => fn(req,res,next)).catch(next);
-function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
+function createApp({ store, telegram, env, catalog, onWork = () => {}, yookassa }) {
+    const provider = env.PAYMENT_PROVIDER || 'stars';
+    const yoo = yookassa || yookassaClient(env);
+    async function syncPayment(order) {
+        if (!order?.provider_payment_id || order.provider !== 'yookassa') return order;
+        const payment = await yoo('GET','payments/'+order.provider_payment_id);
+        if (!yooMatches(order,payment,env)) throw new Error('Payment verification failed');
+        if (payment.status === 'succeeded' && payment.paid === true) await store.paid(order.id,'yoo:'+payment.id);
+        if (payment.status === 'canceled') await store.cancel(order.id);
+        return store.get(order.id);
+    }
+    async function refund(order) {
+        if (order.provider === 'yookassa') {
+            const result = await yoo('POST','refunds',{payment_id:order.provider_payment_id,amount:{value:amountRub(order.amount),currency:'RUB'}},'refund-'+order.id);
+            if (result.status !== 'succeeded') throw new Error('Возврат обрабатывается. Повторите проверку позже.');
+        } else {
+            await telegram('refundStarPayment',{user_id:Number(order.user_id),telegram_payment_charge_id:order.charge_id});
+        }
+        await store.refunded(order.charge_id);
+    }
     const app = express();
     app.disable('x-powered-by');
     app.use((req,res,next) => {
@@ -22,7 +42,7 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
         if (user.username?.toLowerCase() === (env.ADMIN_USERNAME || 'AxmIldan').toLowerCase()) return store.enroll(user.id);
         return false;
     }
-    app.get('/api/catalog', wrap(async (req,res) => res.json(publicCatalog(await store.catalog(catalog)))));
+    app.get('/api/catalog', wrap(async (req,res) => res.json(publicCatalog(await store.catalog(catalog),provider))));
     app.get('/health', (req,res) => res.json({ ok: true }));
     app.use('/api', wrap(async (req,res,next) => {
         try { req.user = verifyInitData(req.get('X-Telegram-Init-Data'), env.BOT_TOKEN); }
@@ -46,16 +66,46 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
         const document = preview ? item.taskTelegramFileId : item.telegramFileId;
         if (!validFile(document)) return res.status(409).json({ error: 'Файл ещё не подготовлен. Напишите в поддержку.' });
         if (item.disabled && !preview) return res.status(409).json({ error: 'Материал временно недоступен.' });
-        const amount = preview || item.type === 'free' ? 0 : item.priceStars;
+        const amount = preview || item.type === 'free' ? 0 : provider === 'yookassa' ? item.priceRub * 100 : item.priceStars;
         if (amount > 0 && !await store.owner()) return res.status(409).json({ error: 'Магазин ещё настраивается.' });
         if (!Number.isSafeInteger(amount) || amount < 0 || (item.type === 'paid' && !preview && amount === 0)) return res.status(409).json({ error: 'Цена пока не назначена.' });
         const member = await telegram('getChat', { chat_id: user });
         if (!member || ['left','kicked'].includes(member.status)) return res.status(409).json({ error: 'Сначала нажмите /start в чате с ботом.' });
         const order = await store.create({ user, file: (preview ? 'task:' : '') + fileId, document,
-            title: (preview ? 'Задание: ' : '') + item.name + ' — ' + item.variant, amount, requestKey });
+            title: (preview ? 'Задание: ' : '') + item.name + ' — ' + item.variant, amount, requestKey, provider, currency: provider === 'yookassa' ? 'RUB' : 'XTR' });
         if (order.file_id !== (preview ? 'task:' : '') + fileId) return res.status(409).json({ error: 'Повторите запрос.' });
         if (order.status === 'paid' || order.status === 'sent') return res.json({ queued: true, orderId: order.id });
         if (order.status !== 'pending') return res.status(409).json({ error: 'Этот счёт уже обрабатывается. Проверьте чат с ботом.' });
+        if (order.provider === 'yookassa') {
+            if (!order.provider_payment_id && Date.now()-new Date(order.created_at).getTime()>23*3600000) {
+                await store.cancel(order.id);
+                return res.status(409).json({error:'Срок запроса истёк. Создайте новый платёж.'});
+            }
+            if (order.provider_payment_id) {
+                const current = await syncPayment(order);
+                if (['paid','sent'].includes(current.status)) return res.json({queued:true,orderId:order.id});
+                if (current.status==='canceled') return res.status(409).json({error:'Платёж отменён. Повторите запрос.'});
+                if (order.invoice_url) return res.json({paymentUrl:order.invoice_url,orderId:order.id});
+            }
+            const me = await telegram('getMe',{});
+            if (!/^[A-Za-z0-9_]+$/.test(me.username || '')) throw new Error('Bot username unavailable');
+            const payment = await yoo('POST','payments',{
+                amount:{value:amountRub(order.amount),currency:'RUB'},capture:true,
+                description:order.title.slice(0,128),metadata:{orderId:order.id},
+                confirmation:{type:'redirect',return_url:'https://t.me/'+me.username+'?start=order_'+order.id}
+            },order.id);
+            await store.bindPayment(order.id,payment.id);
+            const bound = await store.get(order.id);
+            if (!yooMatches(bound,payment,env)) throw new Error('Payment verification failed');
+            if (payment.status==='succeeded' && payment.paid===true) {
+                await store.paid(order.id,'yoo:'+payment.id);
+                return res.json({queued:true,orderId:order.id});
+            }
+            const paymentUrl = payment.confirmation?.confirmation_url;
+            if (!paymentUrl || new URL(paymentUrl).protocol!=='https:') throw new Error('Payment URL unavailable');
+            await store.invoice(order.id,paymentUrl);
+            return res.json({paymentUrl,orderId:order.id});
+        }
         let invoiceUrl = order.invoice_url;
         if (!invoiceUrl) {
             invoiceUrl = await telegram('createInvoiceLink', { title: order.title.slice(0,32),
@@ -66,8 +116,9 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
         res.json({ invoiceUrl, orderId: order.id });
     }));
     api.get('/orders/:id', wrap(async (req,res) => {
-        const order = await store.get(req.params.id);
+        let order = await store.get(req.params.id);
         if (!order || String(order.user_id) !== String(req.user.id)) return res.sendStatus(404);
+        if (order.provider==='yookassa' && order.status==='pending') { order=await syncPayment(order);onWork(); }
         res.json({ status: order.status });
     }));
     async function support(user, text) {
@@ -95,11 +146,22 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
             if (typeof item[key] !== 'string' || item[key].length > (key === 'desc' ? 3000 : 200) || (key !== 'desc' && !item[key].trim())) return res.status(400).json({ error: 'Проверьте поля материала.' });
         }
         if (!['free','paid'].includes(item.type) || (item.priceStars != null && (!Number.isSafeInteger(item.priceStars) || item.priceStars < 1 || item.priceStars > 100000))) return res.status(400).json({ error: 'Цена должна быть целым числом Stars от 1 до 100000.' });
+        if (item.priceRub != null && (!Number.isSafeInteger(item.priceRub) || item.priceRub < 1 || item.priceRub > 100000)) return res.status(400).json({ error: 'Цена в рублях: целое число от 1 до 100000.' });
         for (const key of ['telegramFileId','taskTelegramFileId']) if (item[key] && !validFile(item[key])) return res.status(400).json({ error: 'Некорректный файл Telegram.' });
-        const clean = Object.fromEntries(['course','semester','subject','name','variant','desc','type','priceStars','telegramFileId','taskTelegramFileId'].map(k=>[k,item[k] ?? null]));
+        const clean = Object.fromEntries(['course','semester','subject','name','variant','desc','type','priceStars','priceRub','telegramFileId','taskTelegramFileId'].map(k=>[k,item[k] ?? null]));
         clean.disabled = Boolean(item.disabled);
         await store.saveItem(id,clean);
         res.json({ saved: true });
+    }));
+    api.get('/admin/uploads', wrap(async (req,res) => {
+        const q=String(req.query.q || '').slice(0,200), offset=Number(req.query.offset || 0);
+        if (!Number.isSafeInteger(offset) || offset<0) return res.sendStatus(400);
+        res.json({uploads:await store.uploads(q,offset),storageGroup:await store.storageGroup()});
+    }));
+    api.put('/admin/uploads/:id', wrap(async (req,res) => {
+        if (typeof req.body.folder!=='string' || req.body.folder.length>200) return res.sendStatus(400);
+        if (!await store.folder(req.params.id,req.body.folder.trim())) return res.sendStatus(404);
+        res.json({saved:true});
     }));
     api.get('/admin/orders', wrap(async (req,res) => res.json(await store.adminOrders())));
     api.post('/admin/orders/:id/resend', wrap(async (req,res) => {
@@ -112,12 +174,39 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
         const order = await store.get(req.params.id);
         if (!order?.charge_id || !['paid','sent','refunded'].includes(order.status)) return res.status(409).json({error:'Нет оплаченного заказа.'});
         if (order.status !== 'refunded') {
-            await telegram('refundStarPayment',{user_id:Number(order.user_id),telegram_payment_charge_id:order.charge_id});
-            await store.refunded(order.charge_id);
+            await refund(order);
         }
         res.json({ refunded:true });
     }));
     app.use('/api', api);
+    app.post('/yookassa-webhook', wrap(async (req,res) => {
+        if (!env.YOOKASSA_SHOP_ID || !env.YOOKASSA_SECRET_KEY) return res.sendStatus(503);
+        if (!await store.limit('yoo-webhook:'+req.ip,120)) return res.sendStatus(429);
+        const id = req.body?.object?.id;
+        if (req.body?.type!=='notification' || !['payment.succeeded','payment.canceled','refund.succeeded'].includes(req.body.event)) return res.sendStatus(200);
+        if (typeof id!=='string' || !/^[a-zA-Z0-9-]{1,64}$/.test(id)) return res.sendStatus(400);
+        if (req.body.event==='refund.succeeded') {
+            const result=await yoo('GET','refunds/'+id);
+            const order=await store.byPayment(result.payment_id);
+            if (!order) return res.sendStatus(200);
+            const payment=await yoo('GET','payments/'+order.provider_payment_id);
+            if (!yooMatches(order,payment,env)) throw new Error('Refund payment mismatch');
+            if (result.status==='succeeded' && result.amount?.currency==='RUB' && result.amount.value===amountRub(order.amount)) await store.refunded(order.charge_id);
+            return res.sendStatus(200);
+        }
+        // The body is untrusted. Look up the payment using our merchant credentials.
+        let order=await store.byPayment(id);
+        if (!order) {
+            const payment=await yoo('GET','payments/'+id);
+            order=await store.get(payment.metadata?.orderId || '');
+            if (!order || order.provider!=='yookassa') return res.sendStatus(200);
+            await store.bindPayment(order.id,id);
+            order=await store.get(order.id);
+        }
+        await syncPayment(order);
+        onWork();
+        res.sendStatus(200);
+    }));
     app.post('/telegram-webhook', wrap(async (req,res) => {
         if (!sameSecret(req.get('X-Telegram-Bot-Api-Secret-Token'), env.TELEGRAM_WEBHOOK_SECRET)) return res.sendStatus(403);
         res.on('finish', onWork);
@@ -132,6 +221,25 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
             return res.sendStatus(200);
         }
         const m = update.message;
+        if (m && ['group','supergroup'].includes(m.chat?.type)) {
+            const owner=await store.owner();
+            if (!owner || String(m.from?.id)!==String(owner) || m.sender_chat) return res.sendStatus(200);
+            if (/^\/bind_storage(?:@[A-Za-z0-9_]+)?$/.test(m.text || '')) {
+                if (m.chat.username) { await sendText(m.chat.id,'Используйте закрытую группу без публичного username.');return res.sendStatus(200); }
+                await store.bindStorage(m.chat.id);
+                await sendText(m.chat.id,'Группа подключена. Загружайте документы в темы. В админке нажмите «Обновить». Принимаются только файлы владельца.',{...(m.message_thread_id ? {message_thread_id:m.message_thread_id} : {})});
+            } else if (String(await store.storageGroup())===String(m.chat.id)) {
+                const topicId=m.message_thread_id || 0;
+                const title=m.forum_topic_created?.name || m.forum_topic_edited?.name;
+                if (title) await store.topic(m.chat.id,topicId,title);
+                if (m.document) {
+                    const folder=(m.caption || await store.topic(m.chat.id,topicId) || (topicId ? 'Тема '+topicId : 'Общие файлы')).slice(0,200);
+                    await store.upload(m.document,{folder,chat:m.chat.id,message:m.message_id});
+                    // No confirmation for every upload: the library is the inventory.
+                }
+            }
+            return res.sendStatus(200);
+        }
         if (!m || m.chat?.type !== 'private' || m.from?.id !== m.chat.id) return res.sendStatus(200);
         const user = m.from.id;
         const isAdmin = await admin(m.from);
@@ -151,9 +259,16 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
             } else if (order.status === 'refunded') {
                 await sendText(user,'Возврат уже выполнен.');
             } else {
-                await telegram('refundStarPayment', { user_id: Number(order.user_id), telegram_payment_charge_id: order.charge_id });
-                await store.refunded(order.charge_id);
-                await sendText(user,'Stars возвращены. Заказ: ' + order.id);
+                await refund(order);
+                await sendText(user,'Возврат выполнен. Заказ: ' + order.id);
+            }
+        } else if (isAdmin && m.document && m.caption?.startsWith('/receipt ')) {
+            const order=await store.get(m.caption.slice('/receipt '.length).trim());
+            if (!order || order.amount<=0 || !['paid','sent','refunded'].includes(order.status)) {
+                await sendText(user,'Оплаченный заказ не найден. Укажите /receipt и номер заказа в подписи к чеку.');
+            } else {
+                await telegram('sendDocument',{chat_id:order.user_id,document:m.document.file_id,caption:'Чек по заказу '+order.id});
+                await sendText(user,'Чек передан покупателю.');
             }
         } else if (isAdmin && m.document) {
             await store.upload(m.document);
@@ -162,6 +277,19 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
             const target = await store.supportTarget(m.reply_to_message.message_id);
             if (target) await sendText(target,'Ответ поддержки:\n' + m.text);
             else await sendText(user,'Ответьте на сообщение бота с вопросом студента.');
+        } else if (m.text?.startsWith('/start order_')) {
+            let order=await store.get(m.text.slice('/start order_'.length).trim());
+            if (!order || String(order.user_id)!==String(user)) {
+                await sendText(user,'Этот заказ недоступен в вашем аккаунте.');
+            } else {
+                if (order.provider==='yookassa' && order.status==='pending') order=await syncPayment(order);
+                const text = order.status==='sent' ? 'Документ уже отправлен в этот чат.'
+                    : order.status==='paid' ? 'Оплата подтверждена. Документ скоро придёт в этот чат.'
+                    : order.status==='canceled' ? 'Оплата отменена. Можно вернуться в каталог и попробовать снова.'
+                    : order.status==='refunded' ? 'По заказу выполнен возврат.'
+                    : 'Оплата пока не подтверждена. После подтверждения документ придёт автоматически.';
+                await sendText(user,text,{reply_markup:{inline_keyboard:[[{text:'Открыть материалы',web_app:{url:env.APP_URL}}]]}});
+            }
         } else if (m.text?.match(/^\/start(?:\s|$)/)) {
             await sendText(user,'Выберите материал в приложении. Решение придёт сюда документом. Для повторной выдачи: /purchases. Для помощи: /paysupport.', {
                 reply_markup: { inline_keyboard: [[{ text: 'Открыть материалы', web_app: { url: env.APP_URL } }], ...(isAdmin ? [[{ text: 'Админка', web_app: { url: new URL('/admin',env.APP_URL).href } }]] : [])] }
@@ -207,6 +335,11 @@ function createApp({ store, telegram, env, catalog, onWork = () => {} }) {
                 } catch (err) {
                     await store.failed(order.id, Math.max(err.retryAfter || 0, Math.min(3600, 5 * 2 ** Math.min(order.attempts,10))));
                     console.error('Delivery pending', order.id, err.code || '');
+                }
+            }
+            if (env.YOOKASSA_SHOP_ID && env.YOOKASSA_SECRET_KEY) {
+                for (const order of await store.pendingYoo()) {
+                    try { await syncPayment(order); } catch { console.error('YooKassa reconciliation pending',order.id); }
                 }
             }
         } finally { running = false; }

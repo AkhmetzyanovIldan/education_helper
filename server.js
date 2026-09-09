@@ -13,6 +13,8 @@ async function main() {
     if (!/^https:\/\//.test(env.APP_URL)) throw new Error('APP_URL must use HTTPS');
     if (!/^[A-Za-z0-9_-]{32,256}$/.test(env.TELEGRAM_WEBHOOK_SECRET)) throw new Error('Invalid webhook secret');
     if (env.ADMIN_CHAT_ID && !/^[1-9][0-9]+$/.test(env.ADMIN_CHAT_ID)) throw new Error('ADMIN_CHAT_ID must be your personal Telegram user id');
+    if (!['stars','yookassa'].includes(env.PAYMENT_PROVIDER || 'stars')) throw new Error('Invalid PAYMENT_PROVIDER');
+    if (env.PAYMENT_PROVIDER==='yookassa' && (!env.YOOKASSA_SHOP_ID || !env.YOOKASSA_SECRET_KEY)) throw new Error('Set YooKassa merchant credentials');
     const pool = new Pool({ connectionString: env.DATABASE_URL, max: 5, connectionTimeoutMillis: 3000, statement_timeout: 5000 });
     pool.on('error', () => console.error('Database connection failed'));
     const store = new Store(pool);

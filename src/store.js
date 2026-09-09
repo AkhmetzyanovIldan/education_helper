@@ -13,10 +13,20 @@ class Store {
                 attempts INTEGER NOT NULL DEFAULT 0, lease_until TIMESTAMPTZ,
                 request_key TEXT NOT NULL, UNIQUE(user_id, request_key)
             );
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS currency TEXT NOT NULL DEFAULT 'XTR';
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS provider TEXT NOT NULL DEFAULT 'stars';
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS provider_payment_id TEXT UNIQUE;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS refund_id TEXT;
+            ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_checked_at TIMESTAMPTZ NOT NULL DEFAULT now();
             CREATE INDEX IF NOT EXISTS orders_delivery ON orders(status, next_attempt);
             CREATE TABLE IF NOT EXISTS administrators (role TEXT PRIMARY KEY CHECK(role='owner'), user_id BIGINT UNIQUE NOT NULL);
             CREATE TABLE IF NOT EXISTS catalog_overrides (file_id TEXT PRIMARY KEY, item JSONB NOT NULL);
             CREATE TABLE IF NOT EXISTS uploaded_documents (file_id TEXT PRIMARY KEY, name TEXT NOT NULL, size BIGINT, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+            CREATE TABLE IF NOT EXISTS storage_group (slot INTEGER PRIMARY KEY CHECK(slot=1),chat_id BIGINT NOT NULL);
+            CREATE TABLE IF NOT EXISTS storage_topics (chat_id BIGINT,topic_id BIGINT,name TEXT NOT NULL,PRIMARY KEY(chat_id,topic_id));
+            ALTER TABLE uploaded_documents ADD COLUMN IF NOT EXISTS folder TEXT NOT NULL DEFAULT '';
+            ALTER TABLE uploaded_documents ADD COLUMN IF NOT EXISTS source_chat_id BIGINT;
+            ALTER TABLE uploaded_documents ADD COLUMN IF NOT EXISTS source_message_id BIGINT;
             CREATE TABLE IF NOT EXISTS support_messages (message_id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL);
             CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires TIMESTAMPTZ NOT NULL);
         `);
@@ -31,11 +41,28 @@ class Store {
     async owned(user, file) {
         return (await this.pool.query("SELECT * FROM orders WHERE user_id=$1 AND file_id=$2 AND status IN ('paid','sent') AND amount>0 ORDER BY created_at DESC LIMIT 1", [user, file])).rows[0];
     }
-    async create({ user, file, document, title, amount, requestKey }) {
-        return (await this.pool.query(`INSERT INTO orders (id,user_id,file_id,document,title,amount,status,request_key)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(user_id,request_key) DO UPDATE SET request_key=orders.request_key RETURNING *`,
-        [randomUUID(), user, file, document, title, amount, amount ? 'pending' : 'paid', requestKey])).rows[0];
+    async create({ user, file, document, title, amount, requestKey, currency = 'XTR', provider = 'stars' }) {
+        const insert = client => client.query(`INSERT INTO orders (id,user_id,file_id,document,title,amount,status,request_key,currency,provider)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(user_id,request_key) DO UPDATE SET request_key=orders.request_key RETURNING *`,
+            [randomUUID(),user,file,document,title,amount,amount ? 'pending' : 'paid',requestKey,currency,provider]);
+        if(provider!=='yookassa' || amount===0) return (await insert(this.pool)).rows[0];
+        const client=await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            await client.query('SELECT pg_advisory_xact_lock($1::bigint)',[user]);
+            const existing=(await client.query(`SELECT * FROM orders WHERE user_id=$1 AND file_id=$2 AND amount>0
+                AND (status IN ('paid','sent') OR (provider='yookassa' AND status='pending'))
+                ORDER BY created_at DESC LIMIT 1`,[user,file])).rows[0];
+            const order=existing || (await insert(client)).rows[0];
+            await client.query('COMMIT');
+            return order;
+        } catch(e) {await client.query('ROLLBACK');throw e;}
+        finally {client.release();}
     }
+    async bindPayment(id,paymentId) { await this.pool.query('UPDATE orders SET provider_payment_id=$2 WHERE id=$1 AND (provider_payment_id IS NULL OR provider_payment_id=$2)',[id,paymentId]); }
+    async byPayment(id) { return (await this.pool.query('SELECT * FROM orders WHERE provider_payment_id=$1',[id])).rows[0]; }
+    async cancel(id) { await this.pool.query("UPDATE orders SET status='canceled' WHERE id=$1 AND status='pending'",[id]); }
+    async pendingYoo() { return (await this.pool.query("UPDATE orders SET payment_checked_at=now() WHERE id=(SELECT id FROM orders WHERE provider='yookassa' AND provider_payment_id IS NOT NULL AND status='pending' AND payment_checked_at<now()-interval '5 minutes' ORDER BY payment_checked_at FOR UPDATE SKIP LOCKED LIMIT 1) RETURNING *")).rows; }
     async invoice(id, url) { await this.pool.query('UPDATE orders SET invoice_url=$2 WHERE id=$1', [id,url]); }
     async checkout(id, queryId) {
         const client = await this.pool.connect();
@@ -74,13 +101,20 @@ class Store {
     async enroll(user) { await this.pool.query("INSERT INTO administrators VALUES ('owner',$1) ON CONFLICT DO NOTHING",[user]); return String(await this.owner())===String(user); }
     async catalog(base) { return { ...base, ...Object.fromEntries((await this.pool.query('SELECT * FROM catalog_overrides')).rows.map(r=>[r.file_id,r.item])) }; }
     async saveItem(id,item) { await this.pool.query('INSERT INTO catalog_overrides VALUES ($1,$2) ON CONFLICT(file_id) DO UPDATE SET item=$2',[id,JSON.stringify(item)]); }
-    async upload(doc) { await this.pool.query('INSERT INTO uploaded_documents(file_id,name,size) VALUES ($1,$2,$3) ON CONFLICT(file_id) DO UPDATE SET name=$2',[doc.file_id,doc.file_name || 'Документ',doc.file_size || null]); }
-    async uploads() { return (await this.pool.query('SELECT * FROM uploaded_documents ORDER BY created_at DESC LIMIT 100')).rows; }
-    async adminOrders() { return (await this.pool.query('SELECT id,user_id,file_id,title,amount,status,created_at,sent_at,attempts FROM orders ORDER BY created_at DESC LIMIT 100')).rows; }
+    async storageGroup() { return (await this.pool.query('SELECT chat_id FROM storage_group WHERE slot=1')).rows[0]?.chat_id; }
+    async bindStorage(chat) { await this.pool.query('INSERT INTO storage_group VALUES(1,$1) ON CONFLICT(slot) DO UPDATE SET chat_id=$1',[chat]); }
+    async topic(chat,id,name) { if(name) await this.pool.query('INSERT INTO storage_topics VALUES($1,$2,$3) ON CONFLICT(chat_id,topic_id) DO UPDATE SET name=$3',[chat,id,name]); return (await this.pool.query('SELECT name FROM storage_topics WHERE chat_id=$1 AND topic_id=$2',[chat,id])).rows[0]?.name; }
+    async upload(doc,source={}) { await this.pool.query(`INSERT INTO uploaded_documents(file_id,name,size,folder,source_chat_id,source_message_id) VALUES ($1,$2,$3,$4,$5,$6)
+        ON CONFLICT(file_id) DO UPDATE SET name=$2,folder=CASE WHEN $4='' THEN uploaded_documents.folder ELSE $4 END,
+        source_chat_id=COALESCE($5,uploaded_documents.source_chat_id),source_message_id=COALESCE($6,uploaded_documents.source_message_id)`,
+        [doc.file_id,doc.file_name || 'Документ',doc.file_size || null,source.folder || '',source.chat || null,source.message || null]); }
+    async uploads(query='',offset=0) { return (await this.pool.query("SELECT * FROM uploaded_documents WHERE strpos(lower(name || ' ' || folder),lower($1))>0 ORDER BY created_at DESC,file_id LIMIT 100 OFFSET $2",[query,offset])).rows; }
+    async folder(id,folder) { return (await this.pool.query('UPDATE uploaded_documents SET folder=$2 WHERE file_id=$1',[id,folder])).rowCount; }
+    async adminOrders() { return (await this.pool.query('SELECT id,user_id,file_id,title,amount,currency,provider,status,created_at,sent_at,attempts FROM orders ORDER BY created_at DESC LIMIT 100')).rows; }
     async supportLink(message, user) { await this.pool.query('INSERT INTO support_messages VALUES ($1,$2) ON CONFLICT DO NOTHING', [message,user]); }
     async supportTarget(message) { return (await this.pool.query('SELECT user_id FROM support_messages WHERE message_id=$1', [message])).rows[0]?.user_id; }
     async nextWake() {
-        const row = (await this.pool.query("SELECT EXTRACT(EPOCH FROM (min(GREATEST(next_attempt,COALESCE(lease_until,next_attempt)))-now())) AS delay FROM orders WHERE status='paid'")).rows[0];
+        const row = (await this.pool.query("SELECT EXTRACT(EPOCH FROM (min(due)-now())) AS delay FROM (SELECT GREATEST(next_attempt,COALESCE(lease_until,next_attempt)) AS due FROM orders WHERE status='paid' UNION ALL SELECT payment_checked_at+interval '5 minutes' AS due FROM orders WHERE provider='yookassa' AND status='pending' AND provider_payment_id IS NOT NULL) AS work")).rows[0];
         return row.delay == null ? 900000 : Math.max(1000, Math.min(900000, Number(row.delay)*1000));
     }
     async cleanup() { await this.pool.query("DELETE FROM rate_limits WHERE expires < now()-interval '1 day'"); }

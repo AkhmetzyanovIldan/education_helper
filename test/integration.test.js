@@ -46,8 +46,8 @@ test('HTTP + real PostgreSQL engine: payment, delivery, authorization and admini
     await new Promise(resolve=>server.on('listening',resolve));
     const url='http://127.0.0.1:'+server.address().port;
     t.after(async()=>{await new Promise(resolve=>server.close(resolve));await db.close();});
-    async function request(route,{body,user=123,username='student',method,headers={}}={}) {
-        const response=await fetch(url+route,{method:method || (body?'POST':'GET'),headers:{'Content-Type':'application/json','X-Telegram-Init-Data':auth(user,username),...headers},...(body?{body:JSON.stringify(body)}:{})});
+    async function request(route,{body,user=123,username='student',method,headers={},origin=url}={}) {
+        const response=await fetch(origin+route,{method:method || (body?'POST':'GET'),headers:{'Content-Type':'application/json','X-Telegram-Init-Data':auth(user,username),...headers},...(body?{body:JSON.stringify(body)}:{})});
         return {status:response.status,data:await response.json().catch(()=>null)};
     }
     let updateId=1;
@@ -169,4 +169,72 @@ test('HTTP + real PostgreSQL engine: payment, delivery, authorization and admini
         const r=await fetch(url+'/api/action',{method:'POST',headers:{'Content-Type':'application/json'},body:'{bad'});
         assert.equal(r.status,400);
     });
+    await t.test('storage group accepts only the owner in the bound group and indexes topics',async()=>{
+        const group=(id,user,extra)=>({message:{message_id:50,from:{id:user},chat:{id,type:'supergroup'},...extra}});
+        await webhook(group(-100777,123,{text:'/bind_storage'}));
+        assert.equal(await store.storageGroup(),undefined);
+        await webhook(group(-100777,999,{text:'/bind_storage'}));
+        assert.equal(Number(await store.storageGroup()),-100777);
+        await webhook(group(-100777,999,{message_thread_id:10,forum_topic_created:{name:'Математика'}}));
+        await webhook(group(-100777,123,{document:{file_id:'outsider_file_123',file_name:'bad.pdf'}}));
+        await webhook(group(-100888,999,{document:{file_id:'other_group_file_123',file_name:'wrong.pdf'}}));
+        await webhook(group(-100777,999,{message_thread_id:10,document:{file_id:'topic_file_123',file_name:'решение.pdf'}}));
+        assert.equal((await store.uploads('Математика')).length,1);
+        assert.equal((await store.uploads('bad.pdf')).length,0);
+        assert.equal((await store.uploads('wrong.pdf')).length,0);
+        assert.equal((await store.uploads('решение.pdf'))[0].folder,'Математика');
+        assert.equal((await request('/api/admin/uploads/topic_file_123',{user:123,method:'PUT',body:{folder:'hack'}})).status,403);
+        assert.equal((await request('/api/admin/uploads/topic_file_123',{user:999,method:'PUT',body:{folder:'1 курс / Математика'}})).status,200);
+        assert.equal((await store.uploads('1 курс')).length,1);
+    });
+    await t.test('YooKassa verifies merchant, mode, amount and payment; return link does not grant delivery',async()=>{
+        await pool.query('DELETE FROM rate_limits');
+        const yooEnv={...env,PAYMENT_PROVIDER:'yookassa',YOOKASSA_SHOP_ID:'shop',YOOKASSA_SECRET_KEY:'test-key',YOOKASSA_TEST_MODE:'true'};
+        const payments=new Map(),yooCalls=[];
+        const yookassa=async(method,path,body,key)=>{
+            yooCalls.push({method,path,body,key});
+            if(method==='POST' && path==='payments'){
+                const p={id:'yoo-'+key,status:'pending',paid:false,test:true,recipient:{account_id:'shop'},amount:body.amount,metadata:body.metadata,confirmation:{confirmation_url:'https://yookassa.ru/test-payment'}};
+                payments.set(p.id,p);return p;
+            }
+            if(path==='refunds')return {status:'succeeded',id:'refund',payment_id:body.payment_id,amount:body.amount};
+            if(path.startsWith('refunds/')) { const p=[...payments.values()][0];return {status:'succeeded',id:'refund',payment_id:p.id,amount:p.amount}; }
+            return payments.get(path.slice('payments/'.length));
+        };
+        const yooApp=createApp({store,telegram:async(method,body)=>method==='getMe'?{username:'EducationTestBot'}:telegram(method,body),env:yooEnv,catalog:{rub:{...catalog.paid,priceRub:100}},yookassa});
+        const srv=yooApp.app.listen(0,'127.0.0.1');await new Promise(resolve=>srv.on('listening',resolve));
+        const origin='http://127.0.0.1:'+srv.address().port;
+        try {
+            const purchase=await request('/api/action',{origin,user:888,body:{fileId:'rub',requestKey:crypto.randomUUID()}});
+            assert.equal(purchase.status,200);
+            const order=await store.get(purchase.data.orderId),p=payments.get(order.provider_payment_id);
+            assert.equal(order.amount,10000);assert.equal(order.currency,'RUB');
+            assert.equal(yooCalls[0].body.confirmation.return_url,'https://t.me/EducationTestBot?start=order_'+order.id);
+            const again=await request('/api/action',{origin,user:888,body:{fileId:'rub',requestKey:crypto.randomUUID()}});
+            assert.equal(again.data.orderId,order.id);assert.equal(yooCalls.filter(c=>c.method==='POST').length,1);
+            const incoming=()=>request('/yookassa-webhook',{origin,body:{type:'notification',event:'payment.succeeded',object:{id:p.id,paid:true,status:'succeeded'}}});
+            await incoming();await yooApp.deliverPending();
+            assert.equal((await store.get(order.id)).status,'pending');
+            p.paid=true;p.status='succeeded';p.amount={currency:'RUB',value:'1.00'};
+            assert.equal((await incoming()).status,503);assert.equal((await store.get(order.id)).status,'pending');
+            p.amount={currency:'RUB',value:'100.00'};p.recipient.account_id='other';
+            assert.equal((await incoming()).status,503);
+            p.recipient.account_id='shop';p.test=false;assert.equal((await incoming()).status,503);
+            p.test=true;assert.equal((await incoming()).status,200);
+            await yooApp.deliverPending();
+            const sends=calls.filter(c=>c.method==='sendDocument' && Number(c.body.chat_id)===888);
+            assert.equal(sends.length,1);
+            await incoming();await yooApp.deliverPending();
+            assert.equal(calls.filter(c=>c.method==='sendDocument' && Number(c.body.chat_id)===888).length,1);
+            assert.equal((await request('/api/admin/orders/'+order.id+'/refund',{origin,user:999,body:{}})).status,200);
+            assert.equal((await store.get(order.id)).status,'refunded');
+            assert.equal(yooCalls.at(-1).body.amount.value,'100.00');
+            const refundEvent=await request('/yookassa-webhook',{origin,body:{type:'notification',event:'refund.succeeded',object:{id:'refund'}}});
+            assert.equal(refundEvent.status,200);
+            await webhook(message(999,{document:{file_id:'receipt_file_123',file_name:'чек.pdf'},caption:'/receipt '+order.id}));
+            assert.equal(calls.filter(c=>c.method==='sendDocument' && c.body.document==='receipt_file_123').length,1);
+            assert.equal((await store.uploads('чек.pdf')).length,0);
+        } finally {await new Promise(resolve=>srv.close(resolve));}
+    });
+
 });
