@@ -5,23 +5,37 @@
 <title>Админка — Помощник нефтяник РФ</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="/admin.css">
+<script src="/catalog-tools.js" defer></script>
 <script src="/admin.js" defer></script>
 </head>
 <body><main>
 <header><h1>Управление материалами</h1><a href="/">Каталог студента →</a></header>
 <p id="status" role="status">Проверяем доступ владельца…</p>
 <div id="panel" hidden>
-<nav><button id="refresh" type="button">Обновить</button><button id="new" type="button">Новый материал</button></nav>
-<section><h2>Материалы</h2><p>Отправьте документ в чат с ботом, затем нажмите «Обновить». Файл появится в списках ниже. Фото отправляйте как файл.</p>
+<nav><button id="refresh" type="button">Обновить</button><button id="new" type="button">Новый материал</button><button id="new-variant" type="button">Новый вариант выбранной работы</button></nav>
+<section><h2>Материалы</h2><p>Кнопки каталога создаются из полей «Предмет», «Название работы» и «Вариант». Чтобы добавить кнопку, создайте и сохраните материал с новым названием. Документы загружайте в подключённую группу или личный чат бота, затем нажмите «Обновить». Фото отправляйте как файл.</p>
+<label>Найти материал<input id="materials-search" type="search" placeholder="Предмет, курс, работа, вариант или ID"></label>
+<p id="materials-count" role="status"></p>
 <select id="materials" aria-label="Материал"></select>
+<div id="material-details" aria-live="polite"></div>
 <form id="editor">
-<label>ID материала<input name="id" required pattern="[A-Za-z0-9_-]{1,80}" maxlength="80"></label>
+<input name="id" type="hidden">
+<fieldset><legend>ID материала</legend>
+<p>Схема: УЗ 00 · специальность 00 · курс 0 · семестр 0 · предмет 00 · работа 00 · вариант _00. Однозначные номера дополняются нулём.</p>
+<div id="code-parts" class="code-grid"></div>
+<label>Собранный ID<input name="materialCode" readonly placeholder="Заполните части кода"></label>
+<p id="code-hint"></p>
+</fieldset>
 <div class="grid">
-<label>Курс<input name="course" required maxlength="200"></label>
-<label>Семестр<input name="semester" required maxlength="200"></label>
-<label>Предмет<input name="subject" required maxlength="200"></label>
-<label>Название работы<input name="name" required maxlength="200"></label>
-<label>Вариант<input name="variant" required maxlength="200"></label>
+<label>Учебное заведение (название для учёта)<input name="institution" maxlength="200" list="institution-options"></label>
+<label>Специальность (название для учёта)<input name="specialty" maxlength="200" list="specialty-options"></label>
+</div>
+<div class="grid">
+<label>Курс<input name="course" required maxlength="200" list="course-options"></label>
+<label>Семестр<input name="semester" required maxlength="200" list="semester-options"></label>
+<label>Предмет<input name="subject" required maxlength="200" list="subject-options"></label>
+<label>Название работы<input name="name" required maxlength="200" list="name-options"></label>
+<label>Вариант<input name="variant" required maxlength="200" list="variant-options"></label>
 <label>Доступ<select name="type"><option value="free">Бесплатно</option><option value="paid">Платно</option></select></label>
 </div>
 <label>Описание задания<textarea name="desc" rows="4" maxlength="3000"></textarea></label>
@@ -30,8 +44,20 @@
 <label>Файл решения<select name="telegramFileId"></select></label>
 <label>Файл задания (пусто = показывать описание)<select name="taskTelegramFileId"></select></label>
 <label class="check"><input name="disabled" type="checkbox"> Временно отключить выдачу и оплату</label>
-<button type="submit">Сохранить материал</button>
-</form></section>
+<p>Изменение полей выше применяется только к этому материалу. Чтобы переименовать предмет или работу вместе со всеми вариантами, используйте блок ниже.</p>
+<button id="save-material" type="submit">Сохранить материал</button>
+</form>
+<datalist id="institution-options"></datalist><datalist id="specialty-options"></datalist>
+<datalist id="course-options"></datalist><datalist id="semester-options"></datalist>
+<datalist id="subject-options"></datalist><datalist id="name-options"></datalist><datalist id="variant-options"></datalist>
+</section>
+<section><h2>Переименовать предмет или работу</h2>
+<p>Выберите материал выше. Предмет переименуется для всех его работ в этом курсе и семестре; работа — для всех её вариантов. Учебное заведение и специальность также учитываются. ID и покупки сохранятся.</p>
+<label>Что переименовать<select id="rename-field"><option value="subject">Предмет со всеми работами</option><option value="name">Работу со всеми вариантами</option></select></label>
+<p id="rename-scope"></p>
+<label>Новое название<input id="rename-value" maxlength="200"></label>
+<button id="rename-button" type="button">Переименовать</button>
+</section>
 <section><h2>Библиотека файлов</h2><p id="storage-group"></p>
 <label>Поиск по имени или папке<input id="files-search" type="search" maxlength="200" placeholder="Например: математика"></label>
 <button id="files-search-button" type="button">Найти</button>

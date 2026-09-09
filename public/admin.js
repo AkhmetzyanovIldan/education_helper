@@ -18,13 +18,81 @@ function option(value, text) {
     const node = document.createElement('option');
     node.value = value; node.textContent = text; return node;
 }
-function edit(id) {
+
+const catalogTools = window.CatalogTools;
+const { parts, buildCode, parseCode, materialCode, formatCode, label: materialLabel, sameGroup } = catalogTools;
+let editingId = '', dirty = false, renaming = false;
+const editableFields = ['institution','specialty','course','semester','subject','name','variant','desc','type','priceStars','priceRub'];
+for (const [key,title,width] of parts) {
+    const label = document.createElement('label'); label.textContent = title + ' · ' + width + (width === 1 ? ' цифра' : ' цифры');
+    const input = document.createElement('input');
+    input.name = 'code_' + key; input.inputMode = 'numeric'; input.maxLength = width;
+    input.pattern = '[0-9]{1,' + width + '}'; input.placeholder = '0'.repeat(width);
+    label.append(input); document.getElementById('code-parts').append(label);
+}
+function codeValues() { return Object.fromEntries(parts.map(([key]) => [key,form.elements['code_'+key].value])); }
+function syncCode() {
+    const code = buildCode(codeValues());
+    form.elements.materialCode.value = code;
+    if (!editingId) form.elements.id.value = code;
+    const legacy = editingId && !materialCode(editingId,items[editingId]);
+    document.getElementById('code-hint').textContent = code
+        ? 'По частям: ' + formatCode(code) + '. Смена учётного ID сохраняет связь с прежними покупками.'
+        : legacy ? 'Старый ID: ' + editingId + '. Можно пока оставить его или заполнить все семь частей нового ID.'
+            : 'Заполните все семь частей. Семестр — номер внутри курса (обычно 1 или 2). Названия кнопок задаются ниже.';
+}
+function showDetails() {
+    const draft = Object.fromEntries(editableFields.map(key=>[key,form.elements[key].value]));
+    draft.materialCode = form.elements.materialCode.value;
+    document.getElementById('material-details').textContent = (editingId ? 'Редактируете' : 'Новый материал') +
+        (dirty ? ' · есть несохранённые изменения' : '') + ':\n' + materialLabel(editingId || 'ещё не задан',draft);
+}
+function renderSelector() {
+    const terms = document.getElementById('materials-search').value.toLocaleLowerCase('ru').trim().split(/\s+/).filter(Boolean);
+    const matches = Object.entries(items).filter(([id,item]) => {
+        const haystack = (materialLabel(id,item)+' '+id+' '+formatCode(materialCode(id,item))).toLocaleLowerCase('ru');
+        return terms.every(term=>haystack.includes(term));
+    }).sort(([id,a],[otherId,b])=>materialLabel(id,a).localeCompare(materialLabel(otherId,b),'ru',{numeric:true}));
+    select.replaceChildren(...matches.map(([id,item])=>option(id,materialLabel(id,item))));
+    if (!matches.some(([id])=>id===editingId)) {
+        select.prepend(option('',matches.length ? 'Выберите материал из результатов поиска' : 'Ничего не найдено'));
+        select.value = '';
+    } else select.value = editingId;
+    document.getElementById('materials-count').textContent = 'Найдено: ' + matches.length + ' из ' + Object.keys(items).length;
+}
+function suggestions() {
+    const all = Object.values(items);
+    for (const key of ['institution','specialty','course','semester','subject','name','variant']) {
+        const fields = ['institution','specialty','course','semester','subject','name'];
+        const level = fields.indexOf(key);
+        const relevant = all.filter(item => fields.slice(0,level < 0 ? fields.length : level).every(parent => !form.elements[parent].value || item[parent] === form.elements[parent].value));
+        const values = [...new Set(relevant.map(item=>item[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru',{numeric:true}));
+        document.getElementById(key+'-options').replaceChildren(...values.map(value=>option(value,value)));
+    }
+}
+function renamePreview() {
+    const source = items[editingId], field = document.getElementById('rename-field').value;
+    const affected = source ? Object.values(items).filter(item=>sameGroup(item,source,field)) : [];
+    document.getElementById('rename-scope').textContent = source
+        ? materialLabel(editingId,source) + '\nБудет изменено материалов: ' + affected.length
+        : 'Сначала выберите сохранённый материал.';
+    document.getElementById('rename-value').value = source?.[field] || '';
+    document.getElementById('rename-button').disabled = !source || renaming;
+    document.getElementById('rename-button').textContent = 'Переименовать (' + affected.length + ')';
+}
+function mayLeave() {
+    return !dirty || window.confirm('В форме есть несохранённые изменения. Продолжить без сохранения?');
+}
+function edit(id, draft) {
     form.reset();
-    const item = items[id] || {type:'free'};
+    editingId = id || '';
+    const item = draft || items[id] || {type:'free'};
     form.elements.id.value = id || '';
-    form.elements.id.readOnly = Boolean(id);
-    for (const key of ['course','semester','subject','name','variant','desc','type','priceStars','priceRub']) form.elements[key].value = item[key] ?? '';
+    for (const key of editableFields) form.elements[key].value = item[key] ?? '';
     form.elements.disabled.checked = Boolean(item.disabled);
+    const values = parseCode(materialCode(id,item)) || {};
+    for (const [key] of parts) form.elements['code_'+key].value = values[key] || '';
+    if (draft) form.elements.code_variant.value = '';
     for (const key of ['telegramFileId','taskTelegramFileId']) {
         const field = form.elements[key];
         field.replaceChildren(option('','Не выбран'));
@@ -32,16 +100,17 @@ function edit(id) {
         if (item[key] && !uploads.some(doc=>doc.file_id===item[key])) field.append(option(item[key],'Текущий файл'));
         field.value = item[key] || '';
     }
+    dirty = Boolean(draft);
+    syncCode(); showDetails(); suggestions(); renamePreview();
+    document.getElementById('new-variant').disabled = !id;
 }
-async function refresh() {
+async function refresh(preferredId = editingId || select.value) {
     status.textContent = 'Загрузка…';
     try {
         const catalog = await request('/catalog');
         items = catalog.items; uploads = catalog.uploads;
-        const previous = select.value;
-        select.replaceChildren(...Object.entries(items).map(([id,item]) => option(id,item.name + ' / ' + item.variant)));
-        select.value = Object.hasOwn(items,previous) ? previous : Object.keys(items)[0] || '';
-        edit(select.value);
+        const chosen = Object.hasOwn(items,preferredId) ? preferredId : Object.keys(items)[0] || '';
+        edit(chosen); renderSelector();
         const orders = await request('/orders'), container = document.getElementById('orders');
         container.replaceChildren();
         const labels = {pending:'Ожидает оплаты',checkout:'Подтверждение оплаты',paid:'В очереди выдачи',sent:'Отправлен',refunded:'Возвращён',canceled:'Отменён'};
@@ -75,29 +144,65 @@ async function refresh() {
 }
 form.addEventListener('submit',async event=>{
     event.preventDefault();
-    if(saving) return;
+    if(saving || renaming) return;
     saving=true;
-    const button=form.querySelector('button'); button.disabled=true;
+    const button=document.getElementById('save-material'); button.disabled=true;
     try {
+        syncCode();
+        const anyCode = Object.values(codeValues()).some(value=>value.trim());
+        if ((!editingId || anyCode || materialCode(editingId,items[editingId])) && !form.elements.materialCode.value) throw new Error('Заполните все семь частей ID цифрами указанной длины.');
         const body=Object.fromEntries(new FormData(form));
+        body.materialCode = body.materialCode || null;
+        body.createOnly = !editingId;
         body.priceStars=body.priceStars ? Number(body.priceStars) : null;
         body.priceRub=body.priceRub ? Number(body.priceRub) : null;
         body.disabled=form.elements.disabled.checked;
         await request('/catalog/'+encodeURIComponent(body.id),'PUT',body);
-        await refresh(); status.textContent='Материал сохранён.';
+        dirty=false;
+        await refresh(body.id); status.textContent='Материал сохранён. Кнопки каталога обновятся при повторном открытии приложения.';
     } catch(e) {status.textContent=e.message;}
     finally {saving=false;button.disabled=false;}
 });
-select.addEventListener('change',()=>edit(select.value));
-document.getElementById('refresh').addEventListener('click',refresh);
-document.getElementById('new').addEventListener('click',()=>{select.value='';edit('');});
+
+form.addEventListener('input',()=>{dirty=true;syncCode();showDetails();suggestions();});
+form.addEventListener('change',()=>{dirty=true;showDetails();});
+document.getElementById('materials-search').addEventListener('input',renderSelector);
+select.addEventListener('change',()=>{
+    if (!select.value) return;
+    if (!mayLeave()) {renderSelector();return;}
+    edit(select.value);
+});
+document.getElementById('refresh').addEventListener('click',()=>{if(mayLeave()) refresh();});
+document.getElementById('new').addEventListener('click',()=>{if(mayLeave()){edit('');renderSelector();form.elements.code_institution.focus();}});
+document.getElementById('new-variant').addEventListener('click',()=>{
+    if (!items[editingId] || !mayLeave()) return;
+    const source = items[editingId];
+    const draft = {...source,materialCode:materialCode(editingId,source),variant:'',telegramFileId:'',taskTelegramFileId:''};
+    edit('',draft);renderSelector();
+    status.textContent='Укажите код и название нового варианта, выберите его файлы и сохраните материал.';
+    form.elements.code_variant.focus();
+});
+document.getElementById('rename-field').addEventListener('change',renamePreview);
+document.getElementById('rename-button').addEventListener('click',async()=>{
+    if (saving || renaming || !items[editingId]) return;
+    if (dirty) {status.textContent='Сначала сохраните изменения материала. Затем переименуйте весь раздел.';return;}
+    const field=document.getElementById('rename-field').value;
+    const newName=document.getElementById('rename-value').value.trim();
+    if (!newName) {status.textContent='Введите новое название.';return;}
+    renaming=true;document.getElementById('rename-button').disabled=true;
+    try {
+        const result=await request('/catalog/rename','POST',{sourceId:editingId,field,newName,expectedName:items[editingId][field]});
+        await refresh();status.textContent='Название сохранено. Изменено материалов: '+result.count+'.';
+    } catch(e) {status.textContent=e.message;}
+    finally {renaming=false;document.getElementById('rename-button').disabled=!items[editingId];}
+});
 
 // File inventory is independent of the editor: searches never reset unsaved fields.
 let uploadOffset=0, uploadQuery='';
 function selectUpload(key,doc) {
     const field=form.elements[key];
     if(![...field.options].some(o=>o.value===doc.file_id)) field.append(option(doc.file_id,doc.name));
-    field.value=doc.file_id;
+    field.value=doc.file_id;dirty=true;showDetails();
     status.textContent='Файл выбран. Нажмите «Сохранить материал», чтобы применить.';
 }
 async function loadLibrary() {
@@ -110,7 +215,7 @@ async function loadLibrary() {
         for(const doc of data.uploads) {
             const row=document.createElement('div');row.className='order';
             const title=document.createElement('strong');title.textContent=doc.name;row.append(title);
-            const used=Object.entries(items).filter(([,item])=>item.telegramFileId===doc.file_id || item.taskTelegramFileId===doc.file_id).map(([,item])=>item.name+' / '+item.variant);
+            const used=Object.entries(items).filter(([,item])=>item.telegramFileId===doc.file_id || item.taskTelegramFileId===doc.file_id).map(([id,item])=>materialLabel(id,item));
             const info=document.createElement('p');info.textContent=(doc.folder || 'Без папки')+' · '+(used.length ? 'Используется: '+used.join(', ') : 'Не назначен материалам');row.append(info);
             const folder=document.createElement('input');folder.value=doc.folder || '';folder.maxLength=200;folder.placeholder='Папка: 1 курс / Математика';folder.setAttribute('aria-label','Папка для '+doc.name);row.append(folder);
             for(const [label,handler] of [

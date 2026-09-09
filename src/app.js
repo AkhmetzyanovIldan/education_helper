@@ -2,6 +2,8 @@
 const express = require('express');
 const path = require('node:path');
 const { sameSecret, verifyInitData, validFile, publicCatalog, paymentMatches } = require('./security');
+const { isCode } = require('../public/catalog-tools');
+const { CatalogError } = require('./catalog-error');
 const { yookassaClient, amountRub, matches: yooMatches } = require('./yookassa');
 const wrap = fn => (req,res,next) => Promise.resolve().then(() => fn(req,res,next)).catch(next);
 function createApp({ store, telegram, env, catalog, onWork = () => {}, yookassa }) {
@@ -139,9 +141,21 @@ function createApp({ store, telegram, env, catalog, onWork = () => {}, yookassa 
         next();
     }));
     api.get('/admin/catalog', wrap(async (req,res) => res.json({ items: await store.catalog(catalog), uploads: await store.uploads() })));
+    api.post('/admin/catalog/rename', wrap(async (req,res) => {
+        const { sourceId, field, newName, expectedName } = req.body;
+        if (typeof sourceId !== 'string' || !['subject','name'].includes(field) || typeof newName !== 'string' || !newName.trim() || newName.trim().length > 200 || typeof expectedName !== 'string') return res.status(400).json({error:'Проверьте новое название.'});
+        const count = await store.renameGroup(catalog,sourceId,field,newName.trim(),expectedName);
+        res.json({saved:true,count});
+    }));
     api.put('/admin/catalog/:id', wrap(async (req,res) => {
         const item = req.body, id = req.params.id;
         if (!/^[A-Za-z0-9_-]{1,80}$/.test(id) || ['__proto__','constructor','prototype'].includes(id)) return res.status(400).json({ error: 'Некорректный ID.' });
+        const existing = (await store.catalog(catalog))[id];
+        const code = item.materialCode === undefined ? (existing?.materialCode || (isCode(id) ? id : null)) : item.materialCode;
+        if (code !== null && !isCode(code)) return res.status(400).json({error:'ID должен иметь формат 0102110304_05: 10 цифр, знак _ и 2 цифры варианта.'});
+        if (!existing && (!code || id !== code)) return res.status(400).json({error:'Для нового материала заполните все семь частей ID.'});
+        if (existing?.materialCode && !code) return res.status(400).json({error:'Заполните все части ID. Назначенный код нельзя удалить.'});
+        for (const key of ['institution','specialty']) if (item[key] != null && (typeof item[key] !== 'string' || item[key].length > 200)) return res.status(400).json({error:'Название учебного заведения или специальности слишком длинное.'});
         for (const key of ['course','semester','subject','name','variant','desc']) {
             if (typeof item[key] !== 'string' || item[key].length > (key === 'desc' ? 3000 : 200) || (key !== 'desc' && !item[key].trim())) return res.status(400).json({ error: 'Проверьте поля материала.' });
         }
@@ -149,8 +163,10 @@ function createApp({ store, telegram, env, catalog, onWork = () => {}, yookassa 
         if (item.priceRub != null && (!Number.isSafeInteger(item.priceRub) || item.priceRub < 1 || item.priceRub > 100000)) return res.status(400).json({ error: 'Цена в рублях: целое число от 1 до 100000.' });
         for (const key of ['telegramFileId','taskTelegramFileId']) if (item[key] && !validFile(item[key])) return res.status(400).json({ error: 'Некорректный файл Telegram.' });
         const clean = Object.fromEntries(['course','semester','subject','name','variant','desc','type','priceStars','priceRub','telegramFileId','taskTelegramFileId'].map(k=>[k,item[k] ?? null]));
+        for (const key of ['course','semester','subject','name','variant','institution','specialty']) clean[key] = (item[key] ?? existing?.[key] ?? '').trim();
+        clean.materialCode = code;
         clean.disabled = Boolean(item.disabled);
-        await store.saveItem(id,clean);
+        await store.saveItem(id,clean,catalog,{createOnly:item.createOnly === true});
         res.json({ saved: true });
     }));
     api.get('/admin/uploads', wrap(async (req,res) => {
@@ -314,6 +330,7 @@ function createApp({ store, telegram, env, catalog, onWork = () => {}, yookassa 
     app.get('/', (req,res) => res.sendFile(path.join(__dirname,'../index.html')));
     app.use((err,req,res,next) => {
         if (res.headersSent) return next(err);
+        if (err instanceof CatalogError) return res.status(err.status).json({error:err.message});
         if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Запрос слишком большой.' });
         if (err instanceof SyntaxError && err.status === 400) return res.status(400).json({ error: 'Некорректный JSON.' });
         console.error('Request failed', req.path, err.code || '');

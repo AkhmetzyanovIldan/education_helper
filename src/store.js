@@ -1,5 +1,7 @@
 'use strict';
 const { randomUUID } = require('node:crypto');
+const { materialCode, sameGroup } = require('../public/catalog-tools');
+const { CatalogError } = require('./catalog-error');
 class Store {
     constructor(pool) { this.pool = pool; }
     async init() {
@@ -21,6 +23,7 @@ class Store {
             CREATE INDEX IF NOT EXISTS orders_delivery ON orders(status, next_attempt);
             CREATE TABLE IF NOT EXISTS administrators (role TEXT PRIMARY KEY CHECK(role='owner'), user_id BIGINT UNIQUE NOT NULL);
             CREATE TABLE IF NOT EXISTS catalog_overrides (file_id TEXT PRIMARY KEY, item JSONB NOT NULL);
+            CREATE UNIQUE INDEX IF NOT EXISTS catalog_material_code ON catalog_overrides ((item->>'materialCode')) WHERE item->>'materialCode' IS NOT NULL;
             CREATE TABLE IF NOT EXISTS uploaded_documents (file_id TEXT PRIMARY KEY, name TEXT NOT NULL, size BIGINT, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
             CREATE TABLE IF NOT EXISTS storage_group (slot INTEGER PRIMARY KEY CHECK(slot=1),chat_id BIGINT NOT NULL);
             CREATE TABLE IF NOT EXISTS storage_topics (chat_id BIGINT,topic_id BIGINT,name TEXT NOT NULL,PRIMARY KEY(chat_id,topic_id));
@@ -99,8 +102,44 @@ class Store {
     async recent(user) { return (await this.pool.query("SELECT * FROM orders WHERE user_id=$1 AND status IN ('paid','sent') AND amount>0 ORDER BY created_at DESC LIMIT 10", [user])).rows; }
     async owner() { return (await this.pool.query("SELECT user_id FROM administrators WHERE role='owner'")).rows[0]?.user_id; }
     async enroll(user) { await this.pool.query("INSERT INTO administrators VALUES ('owner',$1) ON CONFLICT DO NOTHING",[user]); return String(await this.owner())===String(user); }
-    async catalog(base) { return { ...base, ...Object.fromEntries((await this.pool.query('SELECT * FROM catalog_overrides')).rows.map(r=>[r.file_id,r.item])) }; }
-    async saveItem(id,item) { await this.pool.query('INSERT INTO catalog_overrides VALUES ($1,$2) ON CONFLICT(file_id) DO UPDATE SET item=$2',[id,JSON.stringify(item)]); }
+    async catalog(base, client = this.pool) { return { ...base, ...Object.fromEntries((await client.query('SELECT * FROM catalog_overrides')).rows.map(r=>[r.file_id,r.item])) }; }
+    async editCatalog(callback) {
+        const client = await this.pool.connect();
+        try {
+            await client.query('BEGIN');
+            // Serializes catalog writes, including concurrent creates and group renames.
+            await client.query("SELECT pg_advisory_xact_lock(71042, 1)");
+            const result = await callback(client);
+            await client.query('COMMIT');
+            return result;
+        } catch (error) { await client.query('ROLLBACK'); throw error; }
+        finally { client.release(); }
+    }
+    async saveItem(id,item,base = {},{createOnly = false} = {}) {
+        return this.editCatalog(async client => {
+            const items = await this.catalog(base,client);
+            if (createOnly && Object.hasOwn(items,id)) throw new CatalogError('Такой ID уже занят. Выберите другой номер варианта или работы.');
+            const code = materialCode(id,item);
+            const duplicate = code && Object.entries(items).find(([otherId,other]) => otherId !== id && (materialCode(otherId,other) === code || otherId === code));
+            if (duplicate) throw new CatalogError('Этот ID уже назначен другому материалу. Существующий материал не изменён.');
+            await client.query('INSERT INTO catalog_overrides VALUES ($1,$2) ON CONFLICT(file_id) DO UPDATE SET item=$2',[id,JSON.stringify(item)]);
+        });
+    }
+    async renameGroup(base,sourceId,field,newName,expectedName) {
+        return this.editCatalog(async client => {
+            const items = await this.catalog(base,client), source = items[sourceId];
+            if (!source) throw new CatalogError('Материал не найден.',404);
+            if (source[field] !== expectedName) throw new CatalogError('Название уже изменилось. Обновите список и повторите.');
+            if (source[field] === newName) return 0;
+            const target = { ...source,[field]:newName };
+            if (Object.values(items).some(item => sameGroup(item,target,field))) throw new CatalogError('Раздел с таким названием уже существует. Выберите другое название, чтобы не объединить разные работы.');
+            const affected = Object.entries(items).filter(([,item]) => sameGroup(item,source,field));
+            for (const [id,item] of affected) {
+                await client.query('INSERT INTO catalog_overrides VALUES ($1,$2) ON CONFLICT(file_id) DO UPDATE SET item=$2',[id,JSON.stringify({...item,[field]:newName})]);
+            }
+            return affected.length;
+        });
+    }
     async storageGroup() { return (await this.pool.query('SELECT chat_id FROM storage_group WHERE slot=1')).rows[0]?.chat_id; }
     async bindStorage(chat) { await this.pool.query('INSERT INTO storage_group VALUES(1,$1) ON CONFLICT(slot) DO UPDATE SET chat_id=$1',[chat]); }
     async topic(chat,id,name) { if(name) await this.pool.query('INSERT INTO storage_topics VALUES($1,$2,$3) ON CONFLICT(chat_id,topic_id) DO UPDATE SET name=$3',[chat,id,name]); return (await this.pool.query('SELECT name FROM storage_topics WHERE chat_id=$1 AND topic_id=$2',[chat,id])).rows[0]?.name; }

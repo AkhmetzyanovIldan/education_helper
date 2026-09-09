@@ -154,9 +154,9 @@ test('HTTP + real PostgreSQL engine: payment, delivery, authorization and admini
     await t.test('admin uploads documents, edits catalog and refunds a payment',async()=>{
         await webhook(message(999,{document:{file_id:'admin_document_123',file_name:'тест.xlsx',file_size:123}}));
         const uploaded=await store.uploads(); assert.equal(uploaded[0].name,'тест.xlsx');
-        const item={...catalog.free,telegramFileId:'admin_document_123',priceStars:null};
-        assert.equal((await request('/api/admin/catalog/new',{user:999,body:item,method:'PUT'})).status,200);
-        assert.equal((await request('/api/catalog')).data.new.available,true);
+        const item={...catalog.free,telegramFileId:'admin_document_123',priceStars:null,materialCode:'0101110101_01'};
+        assert.equal((await request('/api/admin/catalog/0101110101_01',{user:999,body:item,method:'PUT'})).status,200);
+        assert.equal((await request('/api/catalog')).data['0101110101_01'].available,true);
         assert.equal((await request('/api/admin/orders/'+order.id+'/refund',{user:123,body:{}})).status,403);
         assert.equal((await request('/api/admin/orders/'+order.id+'/refund',{user:999,body:{}})).status,200);
         assert.equal((await store.get(order.id)).status,'refunded');
@@ -235,6 +235,59 @@ test('HTTP + real PostgreSQL engine: payment, delivery, authorization and admini
             assert.equal(calls.filter(c=>c.method==='sendDocument' && c.body.document==='receipt_file_123').length,1);
             assert.equal((await store.uploads('чек.pdf')).length,0);
         } finally {await new Promise(resolve=>srv.close(resolve));}
+    });
+
+    await t.test('structured codes are unique and editable without breaking existing purchases',async()=>{
+        await pool.query('DELETE FROM rate_limits');
+        const put=(id,item)=>request('/api/admin/catalog/'+id,{user:999,method:'PUT',body:item});
+        const code='0102110304_05', changed='0102110304_06';
+        const item={...catalog.paid,materialCode:code,institution:'Университет',specialty:'Нефтегазовое дело',createOnly:true};
+        assert.equal((await put('bad',{...item,materialCode:'01 02'})).status,400);
+        assert.equal((await put(code,{...item,materialCode:null})).status,400);
+        assert.equal((await put(code,item)).status,200);
+        assert.equal((await put(code,{...item,name:'Нельзя перезаписать'})).status,409);
+        assert.equal((await store.catalog(catalog))[code].name,catalog.paid.name);
+        const purchase=await store.create({user:456,file:code,document:'solution_file_id_123',title:'Original title',amount:25,requestKey:crypto.randomUUID()});
+        await store.paid(purchase.id,'code-purchase'); await store.delivered(purchase.id);
+        assert.equal((await put(code,{...item,materialCode:changed,createOnly:false})).status,200);
+        assert.equal((await put(changed,{...item,materialCode:changed})).status,409);
+        assert.equal((await put('free',{...catalog.free,materialCode:changed})).status,409);
+        assert.equal((await put(code,{...item,materialCode:null,createOnly:false})).status,400);
+        assert.equal((await store.owned(456,code)).id,purchase.id);
+        const delivered=await request('/api/action',{user:456,body:{fileId:code,requestKey:crypto.randomUUID()}});
+        assert.equal(delivered.data.orderId,purchase.id);assert.equal(delivered.data.queued,true);
+        const catalogResponse=await request('/api/catalog');
+        assert.ok(catalogResponse.data[code]);
+        assert.equal(catalogResponse.data[changed],undefined);
+        assert.equal((await store.get(purchase.id)).title,'Original title');
+        // Legacy material can receive an accounting code while retaining its internal ID.
+        assert.equal((await put('free',{...catalog.free,materialCode:'0102110304_07'})).status,200);
+        assert.equal((await store.catalog(catalog)).free.materialCode,'0102110304_07');
+        await store.init(); // The additive schema change is safe on subsequent deployments.
+        assert.equal((await store.owned(456,code)).id,purchase.id);
+    });
+    await t.test('group rename updates all variants atomically and respects scope and occupied names',async()=>{
+        await pool.query('DELETE FROM rate_limits');
+        const code='0201110101_01';
+        const first={...catalog.free,materialCode:code,institution:'Вуз 2',specialty:'Направление',subject:'Физика',name:'ДЗ',variant:'1'};
+        const second={...first,materialCode:'0201110101_02',variant:'2'};
+        const third={...first,materialCode:'0201110102_01',name:'Лабораторная'};
+        const elsewhere={...first,materialCode:'0201210101_01',course:'2 курс'};
+        for (const item of [first,second,third,elsewhere]) assert.equal((await request('/api/admin/catalog/'+item.materialCode,{user:999,method:'PUT',body:{...item,createOnly:true}})).status,200);
+        const rename=(field,newName,expectedName,user=999)=>request('/api/admin/catalog/rename',{user,body:{sourceId:code,field,newName,expectedName}});
+        assert.equal((await rename('subject','Механика','Физика',123)).status,403);
+        assert.equal((await rename('name','Лабораторная','ДЗ')).status,409);
+        assert.equal((await rename('name','Самостоятельная','ДЗ')).data.count,2);
+        assert.equal((await rename('name','Устаревшее изменение','ДЗ')).status,409);
+        assert.equal((await rename('subject',' Механика ','Физика')).data.count,3);
+        const items=await store.catalog(catalog);
+        assert.equal(items[code].subject,'Механика');
+        assert.equal(items[second.materialCode].name,'Самостоятельная');
+        assert.equal(items[third.materialCode].name,'Лабораторная');
+        assert.equal(items[elsewhere.materialCode].subject,'Физика');
+        assert.equal(items[code].materialCode,code);
+        assert.equal(items[code].telegramFileId,first.telegramFileId);
+        assert.equal((await rename('course','3 курс','1 курс')).status,400);
     });
 
 });
