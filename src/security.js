@@ -24,6 +24,7 @@ function verifyInitData(raw, token, now = Math.floor(Date.now() / 1000)) {
 const validFile = value => typeof value === 'string' && /^[A-Za-z0-9_-]{10,512}$/.test(value);
 function publicCatalog(catalog, provider = 'stars') {
     return Object.fromEntries(Object.entries(catalog).map(([id, item]) => [id, {
+        institution:item.institution || 'РГУНиГ',specialty:item.specialty || 'РФ',
         course: item.course, semester: item.semester, subject: item.subject,
         name: item.name, variant: item.variant, desc: item.desc, type: item.type,
         paymentProvider: provider,

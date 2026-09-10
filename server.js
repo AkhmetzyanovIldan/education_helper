@@ -19,9 +19,11 @@ async function main() {
     pool.on('error', () => console.error('Database connection failed'));
     const store = new Store(pool);
     await store.init();
+    const catalog=require('./catalog.json');
+    await store.hierarchy.ensure(catalog);
     const telegram = telegramClient(env.BOT_TOKEN);
     let worker;
-    const { app, deliverPending } = createApp({ store, telegram, env, catalog: require('./catalog.json'), onWork: () => worker?.wake() });
+    const { app, deliverPending } = createApp({ store, telegram, env, catalog, onWork: () => worker?.wake() });
     const server = app.listen(env.PORT || 3000, () => console.log('Server listening'));
     await telegram('setWebhook', {
         url: new URL('/telegram-webhook', env.APP_URL).href,

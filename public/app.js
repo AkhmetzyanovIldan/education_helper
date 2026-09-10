@@ -1,7 +1,7 @@
         const BACKEND_URL = window.location.origin;
 
         // Состояние навигации
-        let state = { view: 'courses', course: null, semester: null, subject: null };
+        let state = { view: 'institutions', institution:null, specialty:null, course: null, semester: null, subject: null };
 
         // Каталог загружается один раз
         let catalog = Object.create(null);
@@ -27,14 +27,49 @@
             return t;
         }
 
+
+        let organizations=Object.create(null);
+        function buildOrganizations(cat) {
+            const result=Object.create(null);
+            for(const [id,item] of Object.entries(cat)){
+                const institution=item.institution || 'РГУНиГ', specialty=item.specialty || 'РФ';
+                if(!result[institution])result[institution]=Object.create(null);
+                if(!result[institution][specialty])result[institution][specialty]=Object.create(null);
+                result[institution][specialty][id]=item;
+            }
+            return result;
+        }
+        function selectInstitution(name){
+            state.institution=name;state.specialty=null;
+            const specialties=Object.keys(organizations[name]);
+            if(specialties.length===1){selectSpecialty(specialties[0]);return;}
+            state.view='specialties';render();
+        }
+        function selectSpecialty(name){
+            state.specialty=name;state.course=null;state.semester=null;state.subject=null;
+            tree=buildTree(organizations[state.institution][name]);
+            state.view='courses';render();
+        }
+        function renderOrganizations(){
+            const institutions=state.view==='institutions';
+            const names=Object.keys(institutions ? organizations : organizations[state.institution]).sort((a,b)=>a.localeCompare(b,'ru',{numeric:true}));
+            if(!institutions)navActions.innerHTML='<button data-action="goBack" class="text-xs text-zinc-400 hover:text-zinc-200 transition">← Назад</button>';
+            const title=institutions ? 'Выберите учебное заведение' : 'Выберите специальность';
+            appView.innerHTML='<div class="mb-6"><h2 class="text-xl font-semibold tracking-tight text-zinc-100">'+title+'</h2></div><div class="space-y-2">'+names.map(name=>
+                '<button '+actionAttr(institutions ? 'selectInstitution' : 'selectSpecialty',name)+' class="w-full p-4 rounded-xl bg-zinc-900/60 border border-zinc-800/80 hover:border-zinc-700 hover:bg-zinc-900 transition flex items-center justify-between text-left"><span class="text-sm font-medium text-zinc-200">'+escapeHtml(name)+'</span><span class="text-zinc-600">→</span></button>'
+            ).join('')+'</div>';
+        }
+
         async function init() {
             appView.innerHTML = '<div class="text-center text-zinc-500 text-sm py-12">Загрузка...</div>';
             try {
                 const res = await fetch(`${BACKEND_URL}/api/catalog`);
                 if (!res.ok) throw new Error('Catalog unavailable');
                 catalog = await res.json();
-                tree = buildTree(catalog);
-                render();
+                organizations=buildOrganizations(catalog);
+                const institutions=Object.keys(organizations);
+                if(institutions.length===1)selectInstitution(institutions[0]);
+                else render();
             } catch (e) {
                 appView.innerHTML = '<div class="text-center text-zinc-500 text-sm py-12">Ошибка загрузки каталога</div>';
             }
@@ -43,6 +78,7 @@
         function render() {
             appView.innerHTML = '';
             navActions.innerHTML = '';
+            if (['institutions','specialties'].includes(state.view)) renderOrganizations();
             if (state.view === 'courses')   renderCourses();
             if (state.view === 'semesters') renderSemesters();
             if (state.view === 'subjects')  renderSubjects();
@@ -50,6 +86,7 @@
         }
 
         function renderCourses() {
+            if(Object.keys(organizations).length>1 || Object.keys(organizations[state.institution]).length>1)navActions.innerHTML='<button data-action="goBack" class="text-xs text-zinc-400 hover:text-zinc-200 transition">← Назад</button>';
             const courses = Object.keys(tree).sort();
             let html = `
                 <div class="mb-6 flex items-center justify-between">
@@ -158,7 +195,9 @@
         function selectSubject(s)  { state.subject = s; state.view = 'files'; render(); }
 
         function goBack() {
-            if (state.view === 'semesters') { state.view = 'courses'; }
+            if (state.view === 'courses') { state.view=Object.keys(organizations[state.institution]).length>1 ? 'specialties' : 'institutions'; }
+            else if(state.view==='specialties'){state.view='institutions';}
+            else if (state.view === 'semesters') { state.view = 'courses'; }
             else if (state.view === 'subjects') { state.view = 'semesters'; }
             else if (state.view === 'files') { state.view = 'subjects'; }
             render();
@@ -179,23 +218,24 @@
             document.getElementById('modal').classList.replace('hidden', 'flex');
         }
 
-        function openTaskInfo(group, button) {
-            const preview = group.variants.find(v => v.item.hasTaskFile);
-            if (preview) { handleAction(preview.fileId, true, button); return; }
-            const content = document.getElementById('modal-content');
-            content.innerHTML = `
-                <div class="mb-4">
-                    <span class="text-xs text-zinc-500 uppercase tracking-wider">${escapeHtml(state.subject)}</span>
-                    <h3 class="text-lg font-medium text-zinc-100 mt-1">${escapeHtml(group.name)}</h3>
-                </div>
-                <div class="bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-4 mb-4 max-h-64 overflow-y-auto">
-                    <p class="text-sm text-zinc-300 leading-relaxed">${escapeHtml(group.desc || 'Описание недоступно')}</p>
-                    <div class="mt-4 text-xs text-zinc-500">
-                        <p><strong>Предмет:</strong> ${escapeHtml(state.subject)}</p>
-                        <p><strong>Вариантов:</strong> ${group.variants.length}</p>
-                    </div>
-                </div>
-                <button ${actionAttr("openFileModal",group)} class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">← Назад</button>`;
+
+        let taskGroup=null;
+        function openTaskInfo(group,button) {
+            taskGroup=group;
+            if(group.variants.length===1){openVariantTask(group.variants[0].fileId,button);return;}
+            document.getElementById('modal-content').innerHTML=
+                '<h3 class="text-lg font-medium text-zinc-100 mb-4">Выберите вариант задания</h3><div class="space-y-2">'+
+                group.variants.map(({fileId,item})=>'<button '+actionAttr('openVariantTask',fileId)+' class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">'+escapeHtml(item.variant)+'</button>').join('')+
+                '</div><button '+actionAttr('openFileModal',group)+' class="w-full mt-3 py-2 px-4 rounded-xl bg-zinc-950 text-zinc-400 hover:text-zinc-200 text-xs transition">← Назад</button>';
+        }
+        function openVariantTask(fileId,button) {
+            const item=catalog[fileId];
+            if(!item || !taskGroup)return;
+            if(item.hasTaskFile){handleAction(fileId,true,button);return;}
+            document.getElementById('modal-content').innerHTML=
+                '<div class="mb-4"><span class="text-xs text-zinc-500">'+escapeHtml(state.subject)+'</span><h3 class="text-lg font-medium text-zinc-100 mt-1">'+escapeHtml(item.name)+' — '+escapeHtml(item.variant)+'</h3></div>'+
+                '<div class="bg-zinc-800/30 border border-zinc-700/50 rounded-lg p-4 mb-4 max-h-64 overflow-y-auto"><p class="text-sm text-zinc-300 leading-relaxed">'+escapeHtml(item.desc || 'Описание недоступно')+'</p></div>'+
+                '<button '+actionAttr(taskGroup.variants.length===1 ? 'openFileModal' : 'openTaskInfo',taskGroup)+' class="w-full py-2.5 px-4 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 font-medium text-xs transition">← Назад</button>';
         }
 
         function showVariants(group) {
@@ -384,7 +424,7 @@
         function actionAttr(action, value) {
             return 'data-action="' + action + '" data-value="' + escapeHtml(JSON.stringify(value)) + '"';
         }
-        const actions = { selectCourse, selectSemester, selectSubject, openFileModal, openTaskInfo, showVariants, handleAction: (id, button) => handleAction(id, false, button), dismissFeedback, goBack, openSupportModal, closeSupportModal, closeModal };
+        const actions = { selectInstitution, selectSpecialty, selectCourse, selectSemester, selectSubject, openFileModal, openTaskInfo, openVariantTask, showVariants, handleAction: (id, button) => handleAction(id, false, button), dismissFeedback, goBack, openSupportModal, closeSupportModal, closeModal };
         document.addEventListener('click', event => {
             const button = event.target.closest('[data-action]');
             if (!button || button.disabled || !Object.hasOwn(actions, button.dataset.action)) return;

@@ -2,8 +2,8 @@
 const express = require('express');
 const path = require('node:path');
 const { sameSecret, verifyInitData, validFile, publicCatalog, paymentMatches } = require('./security');
-const { isCode } = require('../public/catalog-tools');
 const { CatalogError } = require('./catalog-error');
+const { label:materialLabel }=require('../public/hierarchy-tools');
 const { yookassaClient, amountRub, matches: yooMatches } = require('./yookassa');
 const wrap = fn => (req,res,next) => Promise.resolve().then(() => fn(req,res,next)).catch(next);
 function createApp({ store, telegram, env, catalog, onWork = () => {}, yookassa }) {
@@ -141,38 +141,45 @@ function createApp({ store, telegram, env, catalog, onWork = () => {}, yookassa 
         next();
     }));
     api.get('/admin/catalog', wrap(async (req,res) => res.json({ items: await store.catalog(catalog), uploads: await store.uploads() })));
-    api.post('/admin/catalog/rename', wrap(async (req,res) => {
-        const { sourceId, field, newName, expectedName } = req.body;
-        if (typeof sourceId !== 'string' || !['subject','name'].includes(field) || typeof newName !== 'string' || !newName.trim() || newName.trim().length > 200 || typeof expectedName !== 'string') return res.status(400).json({error:'Проверьте новое название.'});
-        const count = await store.renameGroup(catalog,sourceId,field,newName.trim(),expectedName);
-        res.json({saved:true,count});
+    api.get('/admin/structure', wrap(async (req,res) => {
+        const id=req.query.parent;
+        if(id!==undefined && typeof id!=='string')return res.status(400).json({error:'Некорректный раздел.'});
+        res.json({...await store.hierarchy.browse(catalog,id || null),paymentProvider:provider});
     }));
-    api.put('/admin/catalog/:id', wrap(async (req,res) => {
-        const item = req.body, id = req.params.id;
-        if (!/^[A-Za-z0-9_-]{1,80}$/.test(id) || ['__proto__','constructor','prototype'].includes(id)) return res.status(400).json({ error: 'Некорректный ID.' });
-        const existing = (await store.catalog(catalog))[id];
-        const code = item.materialCode === undefined ? (existing?.materialCode || (isCode(id) ? id : null)) : item.materialCode;
-        if (code !== null && !isCode(code)) return res.status(400).json({error:'ID должен иметь формат 0102110304_05: 10 цифр, знак _ и 2 цифры варианта.'});
-        if (!existing && (!code || id !== code)) return res.status(400).json({error:'Для нового материала заполните все семь частей ID.'});
-        if (existing?.materialCode && !code) return res.status(400).json({error:'Заполните все части ID. Назначенный код нельзя удалить.'});
-        for (const key of ['institution','specialty']) if (item[key] != null && (typeof item[key] !== 'string' || item[key].length > 200)) return res.status(400).json({error:'Название учебного заведения или специальности слишком длинное.'});
-        for (const key of ['course','semester','subject','name','variant','desc']) {
-            if (typeof item[key] !== 'string' || item[key].length > (key === 'desc' ? 3000 : 200) || (key !== 'desc' && !item[key].trim())) return res.status(400).json({ error: 'Проверьте поля материала.' });
-        }
-        if (!['free','paid'].includes(item.type) || (item.priceStars != null && (!Number.isSafeInteger(item.priceStars) || item.priceStars < 1 || item.priceStars > 100000))) return res.status(400).json({ error: 'Цена должна быть целым числом Stars от 1 до 100000.' });
-        if (item.priceRub != null && (!Number.isSafeInteger(item.priceRub) || item.priceRub < 1 || item.priceRub > 100000)) return res.status(400).json({ error: 'Цена в рублях: целое число от 1 до 100000.' });
-        for (const key of ['telegramFileId','taskTelegramFileId']) if (item[key] && !validFile(item[key])) return res.status(400).json({ error: 'Некорректный файл Telegram.' });
-        const clean = Object.fromEntries(['course','semester','subject','name','variant','desc','type','priceStars','priceRub','telegramFileId','taskTelegramFileId'].map(k=>[k,item[k] ?? null]));
-        for (const key of ['course','semester','subject','name','variant','institution','specialty']) clean[key] = (item[key] ?? existing?.[key] ?? '').trim();
-        clean.materialCode = code;
-        clean.disabled = Boolean(item.disabled);
-        await store.saveItem(id,clean,catalog,{createOnly:item.createOnly === true});
-        res.json({ saved: true });
+    api.post('/admin/structure', wrap(async (req,res) => {
+        const {parentId,name,requestKey}=req.body;
+        if((parentId!==null && typeof parentId!=='string') || typeof name!=='string' || !name.trim() || name.trim().length>200 || typeof requestKey!=='string' || !/^[a-f0-9-]{36}$/.test(requestKey))return res.status(400).json({error:'Введите название до 200 символов.'});
+        const node=await store.hierarchy.create(catalog,parentId,name.trim(),requestKey);
+        res.json({saved:true,node});
     }));
+    api.patch('/admin/structure/:id', wrap(async (req,res) => {
+        const {name,expectedVersion}=req.body;
+        if(typeof name!=='string' || !name.trim() || name.trim().length>200 || !Number.isInteger(expectedVersion))return res.status(400).json({error:'Проверьте название раздела.'});
+        const node=await store.hierarchy.rename(catalog,req.params.id,name.trim(),expectedVersion);
+        res.json({saved:true,node});
+    }));
+    api.delete('/admin/structure/:id', wrap(async (req,res) => {
+        if(!Number.isInteger(req.body.expectedRevision))return res.status(400).json({error:'Обновите список перед удалением.'});
+        res.json({saved:true,...await store.hierarchy.remove(catalog,req.params.id,req.body.expectedRevision)});
+    }));
+    api.put('/admin/structure/:id/variant', wrap(async (req,res) => {
+        const item=req.body;
+        if(typeof item.desc!=='string' || item.desc.length>3000 || !['free','paid'].includes(item.type) || typeof item.disabled!=='boolean' || !Number.isInteger(item.expectedVersion))return res.status(400).json({error:'Проверьте поля варианта.'});
+        for(const key of ['priceStars','priceRub'])if(item[key]!=null && (!Number.isSafeInteger(item[key]) || item[key]<1 || item[key]>100000))return res.status(400).json({error:'Цена должна быть целым числом от 1 до 100000.'});
+        for(const key of ['telegramFileId','taskTelegramFileId'])if(item[key] && !validFile(item[key]))return res.status(400).json({error:'Некорректный файл Telegram.'});
+        if(!item.disabled && !validFile(item.telegramFileId))return res.status(400).json({error:'Выберите файл решения или оставьте вариант временно отключённым.'});
+        const clean=Object.fromEntries(['desc','type','disabled','priceStars','priceRub','telegramFileId','taskTelegramFileId'].map(key=>[key,item[key] ?? null]));
+        const result=await store.hierarchy.saveVariant(catalog,req.params.id,clean,item.expectedVersion);
+        res.json({saved:true,...result});
+    }));
+    // Stale tabs cannot overwrite hierarchy names or assign manual material IDs.
+    api.all(['/admin/catalog/:id','/admin/catalog/rename'], (req,res)=>res.status(410).json({error:'Админка обновлена. Закройте и заново откройте её через бота.'}));
     api.get('/admin/uploads', wrap(async (req,res) => {
         const q=String(req.query.q || '').slice(0,200), offset=Number(req.query.offset || 0);
         if (!Number.isSafeInteger(offset) || offset<0) return res.sendStatus(400);
-        res.json({uploads:await store.uploads(q,offset),storageGroup:await store.storageGroup()});
+        const items=Object.values(await store.catalog(catalog));
+        const uploads=(await store.uploads(q,offset)).map(doc=>({...doc,usedIn:items.filter(item=>item.telegramFileId===doc.file_id || item.taskTelegramFileId===doc.file_id).map(materialLabel)}));
+        res.json({uploads,storageGroup:await store.storageGroup()});
     }));
     api.put('/admin/uploads/:id', wrap(async (req,res) => {
         if (typeof req.body.folder!=='string' || req.body.folder.length>200) return res.sendStatus(400);

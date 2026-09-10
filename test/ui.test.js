@@ -25,33 +25,6 @@ test('student UI keeps navigation and safely renders quotes and HTML-like catalo
     assert.equal(w.document.querySelector('[onclick]'),null);
     dom.window.close();
 });
-test('admin edits material fields and sends explicit Stars prices through authenticated API',async()=>{
-    const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../public/admin.html'),'utf8'),{url:'https://example.test/admin',runScripts:'outside-only'});
-    const w=dom.window;
-    w.Telegram={WebApp:{initData:'signed-test',ready(){},expand(){}}};
-    const item={course:'1 курс',semester:'1 семестр',subject:'Математика',name:'Тест',variant:'1',desc:'Задание',type:'paid',priceStars:null};
-    const calls=[];
-    w.fetch=async(url,options)=>{
-        calls.push({url,options});
-        return {ok:true,status:200,json:async()=>url.endsWith('/catalog')?{items:{a:item},uploads:[{file_id:'file_id_123456',name:'пример.docx'}]}:url.endsWith('/orders')?[]:url.includes('/uploads?')?{uploads:[],storageGroup:null}:{saved:true}};
-    };
-    w.eval(fs.readFileSync(path.join(__dirname,'../public/catalog-tools.js'),'utf8'));
-    w.eval(fs.readFileSync(path.join(__dirname,'../public/admin.js'),'utf8'));
-    await tick();await tick();
-    assert.equal(w.document.getElementById('panel').hidden,false);
-    const form=w.document.getElementById('editor');
-    assert.equal(form.elements.name.value,'Тест');
-    assert.equal(form.elements.priceStars.value,'');
-    form.elements.priceStars.value='42';
-    form.elements.telegramFileId.value='file_id_123456';
-    form.dispatchEvent(new w.Event('submit',{cancelable:true}));
-    await tick();await tick();
-    const put=calls.find(c=>c.options.method==='PUT');
-    assert.ok(put);
-    assert.equal(JSON.parse(put.options.body).priceStars,42);
-    assert.equal(put.options.headers['X-Telegram-Init-Data'],'signed-test');
-    dom.window.close();
-});
 test('download shows immediate feedback, blocks repeat clicks and keeps confirmation visible',async()=>{
     const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{url:'https://example.test',runScripts:'outside-only'});
     const w=dom.window;
@@ -101,104 +74,179 @@ test('failed download restores button and reuses request key on retry',async()=>
     dom.window.close();
 });
 
-async function adminFixture(items) {
-    const dom = new JSDOM(fs.readFileSync(path.join(__dirname,'../public/admin.html'),'utf8'),{url:'https://example.test/admin',runScripts:'outside-only'});
-    const w=dom.window,calls=[];
-    w.Telegram={WebApp:{initData:'signed-test',ready(){},expand(){}}};
-    w.confirm=()=>true;
-    const documents=[{file_id:'solution_file_id',name:'решение.docx',folder:'Математика'},{file_id:'task_file_id',name:'задание.pdf',folder:'Математика'}];
-    w.fetch=async(url,options)=>{
+
+async function adminFixture(){
+    const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../public/admin.html'),'utf8'),{url:'https://example.test/admin',runScripts:'outside-only'});
+    const w=dom.window,calls=[];w.confirm=()=>true;
+    w.Telegram={WebApp:{initData:'signed-owner',ready(){},expand(){}}};
+    const helpers=require('../public/hierarchy-tools');
+    const nodes=['Вуз','Специальность','1 курс','1 семестр','Математика','ДЗ','Вариант 1'].map((name,level)=>({id:'n'+level,parent_id:level ? 'n'+(level-1) : null,level,number:1,name,version:1,material_id:level===6 ? 'legacy' : null}));
+    const items={legacy:{institution:'Вуз',specialty:'Специальность',course:'1 курс',semester:'1 семестр',subject:'Математика',name:'ДЗ',variant:'Вариант 1',materialCode:'010101010101_01',type:'paid',priceStars:30,priceRub:150,desc:'Условие',telegramFileId:'solution_file_id',taskTelegramFileId:'task_file_id',disabled:false}};
+    const docs=[{file_id:'solution_file_id',name:'Решение.docx',folder:'Математика'},{file_id:'task_file_id',name:'Задание.pdf'},{file_id:'extra_file_id',name:'Другой.docx'}];
+    let revision=1;
+    const nodePath=id=>{const result=[];for(let current=nodes.find(n=>n.id===id);current;current=nodes.find(n=>n.id===current.parent_id))result.unshift(current);return result;};
+    const descendants=id=>nodes.filter(node=>nodePath(node.id).some(parent=>parent.id===id));
+    const decorate=node=>({...node,code:helpers.code(nodePath(node.id)),descendantCount:descendants(node.id).length-1,variantCount:descendants(node.id).filter(n=>n.level===6).length});
+    w.fetch=async(url,options={})=>{
         calls.push({url,options});
-        const body=options.body ? JSON.parse(options.body) : null;
+        const body=options.body ? JSON.parse(options.body) : null,parsed=new URL(url,'https://example.test');
         let result;
-        if(options.method==='PUT' && url.includes('/catalog/')) {items[decodeURIComponent(url.split('/').at(-1))]=body;result={saved:true};}
-        else if(url.endsWith('/catalog/rename')) {
-            let count=0;
-            for(const item of Object.values(items)) if(w.CatalogTools.sameGroup(item,items[body.sourceId],body.field)) count++;
-            const targets=Object.values(items).filter(item=>w.CatalogTools.sameGroup(item,items[body.sourceId],body.field));
-            for(const item of targets)item[body.field]=body.newName;
-            result={saved:true,count};
-        }
-        else if(url.endsWith('/catalog')) result={items,uploads:documents};
-        else if(url.includes('/uploads?'))result={uploads:documents,storageGroup:'-100'};
+        if(parsed.pathname==='/api/admin/structure' && options.method==='GET'){
+            const id=parsed.searchParams.get('parent'),node=nodes.find(n=>n.id===id);
+            result={node:node ? decorate(node) : null,path:id ? nodePath(id) : [],children:nodes.filter(n=>n.parent_id===id).map(decorate),revision,item:node?.material_id ? items[node.material_id] : null,files:docs,paymentProvider:'yookassa'};
+        }else if(parsed.pathname==='/api/admin/structure' && options.method==='POST'){
+            const parent=nodes.find(n=>n.id===body.parentId);
+            const node={id:'created'+nodes.length,parent_id:body.parentId,level:parent ? parent.level+1 : 0,number:1+Math.max(0,...nodes.filter(n=>n.parent_id===body.parentId).map(n=>n.number)),name:body.name,version:1};
+            nodes.push(node);revision++;result={saved:true,node};
+        }else if(options.method==='PATCH'){
+            const node=nodes.find(n=>n.id===parsed.pathname.split('/').at(-1));
+            node.name=body.name;node.version++;revision++;result={saved:true,node};
+        }else if(options.method==='DELETE'){
+            const id=parsed.pathname.split('/').at(-1),node=nodes.find(n=>n.id===id),targets=new Set(descendants(id).map(n=>n.id));
+            for(let i=nodes.length-1;i>=0;i--)if(targets.has(nodes[i].id))nodes.splice(i,1);
+            revision++;result={saved:true,parentId:node.parent_id,removed:targets.size};
+        }else if(parsed.pathname.endsWith('/variant')){
+            const node=nodes.find(n=>n.id===parsed.pathname.split('/').at(-2));node.version++;revision++;
+            items[node.material_id]={...items[node.material_id],...body};
+            result={saved:true,node:decorate(node),item:items[node.material_id],revision};
+        }else if(parsed.pathname==='/api/admin/uploads')result={uploads:docs,storageGroup:'-100'};
         else result=[];
         return {ok:true,status:200,json:async()=>JSON.parse(JSON.stringify(result))};
     };
-    w.eval(fs.readFileSync(path.join(__dirname,'../public/catalog-tools.js'),'utf8'));
+    w.eval(fs.readFileSync(path.join(__dirname,'../public/hierarchy-tools.js'),'utf8'));
     w.eval(fs.readFileSync(path.join(__dirname,'../public/admin.js'),'utf8'));
     await tick();await tick();
-    return {dom,w,calls};
+    const openVariant=async()=>{for(let i=0;i<7;i++){w.document.querySelector('[data-action="open"][data-id="n'+i+'"]').click();await tick();await tick();}};
+    return {dom,w,calls,nodes,items,openVariant};
 }
-test('admin search shows the full hierarchy without discarding the current editor',async()=>{
-    const item={course:'2 курс',semester:'1 семестр',subject:'Математика',name:'ДЗ #1',variant:'3 вариант',desc:'',type:'free'};
-    const {dom,w}=await adminFixture({old:item,other:{...item,subject:'Физика'}});
-    try {
-        const d=w.document,form=d.getElementById('editor');
-        assert.match(d.getElementById('materials').textContent,/2 курс → 1 семестр → Математика → ДЗ #1 → 3 вариант → ID old/);
-        assert.match(d.getElementById('material-details').textContent,/Математика/);
-        form.elements.desc.value='Несохранённое описание';
-        form.elements.desc.dispatchEvent(new w.Event('input',{bubbles:true}));
-        const search=d.getElementById('materials-search');
-        search.value='Физика 2 курс';search.dispatchEvent(new w.Event('input'));
-        assert.equal(d.querySelectorAll('#materials option[value="other"]').length,1);
-        assert.equal(d.querySelectorAll('#materials option[value="old"]').length,0);
-        assert.equal(form.elements.desc.value,'Несохранённое описание');
-        search.value='<script>';search.dispatchEvent(new w.Event('input'));
-        assert.match(d.getElementById('materials-count').textContent,/Найдено: 0/);
-        assert.equal(form.elements.id.value,'old');
-        assert.match(d.getElementById('file-library').textContent,/Не назначен материалам/);
-    } finally {dom.window.close();}
+test('admin navigates seven levels and only loads file library at variant level',async()=>{
+    const {dom,w,calls,openVariant}=await adminFixture();
+    try{
+        const d=w.document;
+        assert.equal(d.getElementById('panel').hidden,false);
+        assert.equal(d.getElementById('variant-panel').hidden,true);
+        assert.equal(calls.some(call=>call.url.includes('/uploads')),false);
+        assert.equal(d.getElementById('create-node').textContent,'Создать: учебное заведение');
+        await openVariant();
+        assert.equal(d.getElementById('variant-panel').hidden,false);
+        assert.equal(d.getElementById('branch-panel').hidden,true);
+        assert.equal(calls.filter(call=>call.url.includes('/uploads')).length,1);
+        assert.equal(d.getElementById('material-code').value,'010101010101_01');
+        assert.equal(d.getElementById('material-code').readOnly,true);
+        assert.equal(d.querySelectorAll('#breadcrumbs button').length,8);
+        assert.equal(d.getElementById('editor').elements.priceRub.value,'150');
+        d.querySelector('[data-action="open"][data-id="n4"]').click();await tick();await tick();
+        assert.equal(d.getElementById('variant-panel').hidden,true);
+        assert.equal(d.getElementById('create-node').textContent,'Создать: работа');
+    }finally{dom.window.close();}
 });
-test('admin new variant builds structured ID, clears documents and selects saved material',async()=>{
-    const id='0102110304_05';
-    const item={materialCode:id,institution:'Вуз',specialty:'Нефтегазовое дело',course:'1 курс',semester:'1 семестр',subject:'Математика',name:'ДЗ',variant:'5 вариант',desc:'Условие',type:'paid',priceStars:42,telegramFileId:'solution_file_id',taskTelegramFileId:'task_file_id'};
-    const {dom,w,calls}=await adminFixture({[id]:item});
-    try {
-        const d=w.document,form=d.getElementById('editor');
-        assert.match(d.getElementById('file-library').textContent,/Вуз → Нефтегазовое дело → 1 курс → 1 семестр → Математика/);
-        d.getElementById('new-variant').click();
-        assert.equal(form.elements.name.value,'ДЗ');
-        assert.equal(form.elements.priceStars.value,'42');
-        assert.equal(form.elements.code_institution.value,'01');
-        assert.equal(form.elements.code_variant.value,'');
-        assert.equal(form.elements.telegramFileId.value,'');
-        assert.equal(form.elements.taskTelegramFileId.value,'');
-        form.dispatchEvent(new w.Event('submit',{cancelable:true}));
+test('admin creates a named section without manual ID fields, renames it and confirms deletion',async()=>{
+    const {dom,w,calls}=await adminFixture();
+    try{
+        const d=w.document;
+        d.getElementById('create-node').click();
+        d.getElementById('node-name').value='Другой вуз';
+        d.getElementById('save-name').click();await tick();await tick();
+        const create=calls.find(call=>call.options.method==='POST'),body=JSON.parse(create.options.body);
+        assert.equal(body.parentId,null);assert.equal(body.name,'Другой вуз');
+        assert.ok(body.requestKey);assert.equal(body.materialCode,undefined);
+        assert.equal(d.getElementById('view-title').textContent,'Другой вуз');
+        assert.match(d.getElementById('view-code').textContent,/02/);
+        d.getElementById('rename-current').click();d.getElementById('node-name').value='Переименованный вуз';d.getElementById('save-name').click();await tick();await tick();
+        assert.equal(d.getElementById('view-title').textContent,'Переименованный вуз');
+        w.confirm=()=>false;d.getElementById('delete-current').click();await tick();
+        assert.equal(calls.some(call=>call.options.method==='DELETE'),false);
+        let confirmation;w.confirm=text=>{confirmation=text;return true;};
+        d.getElementById('delete-current').click();await tick();await tick();
+        assert.match(confirmation,/Переименованный вуз/);assert.match(confirmation,/Вариантов: 0/);
+        assert.ok(calls.find(call=>call.options.method==='DELETE'));
+        assert.equal(d.getElementById('view-title').textContent,'Учебные заведения');
+    }finally{dom.window.close();}
+});
+test('variant save immediately shows progress and confirms saved price without unrelated refresh',async()=>{
+    const {dom,w,openVariant,items,nodes}=await adminFixture();
+    try{
+        await openVariant();const d=w.document,form=d.getElementById('editor'),button=d.getElementById('save-material');
+        form.elements.priceRub.value='250';form.elements.priceRub.dispatchEvent(new w.Event('input',{bubbles:true}));
+        let finish,count=0,sent;
+        w.fetch=async(url,options)=>{
+            count++;sent=JSON.parse(options.body);
+            return new Promise(resolve=>{finish=()=>resolve({ok:true,status:200,json:async()=>({saved:true,node:{...nodes[6],version:2},item:{...items.legacy,priceRub:250},revision:2})});});
+        };
+        button.click();assert.equal(button.disabled,true);assert.equal(button.textContent,'Сохраняем…');
+        assert.equal(d.getElementById('save-result').dataset.kind,'pending');
+        button.click();assert.equal(count,1);assert.equal(sent.priceRub,250);assert.equal(sent.materialCode,undefined);
+        finish();await tick();await tick();
+        assert.equal(button.disabled,false);assert.equal(button.textContent,'✓ Сохранено');
+        assert.equal(d.getElementById('save-result').dataset.kind,'success');
+        assert.match(d.getElementById('file-library').textContent,/Используется: Вуз → Специальность → 1 курс/);
+        assert.equal(count,1);
+    }finally{dom.window.close();}
+});
+test('save errors stay visible and entered price remains in form; invalid price does not send',async()=>{
+    const {dom,w,openVariant}=await adminFixture();
+    try{
+        await openVariant();const d=w.document,form=d.getElementById('editor');
+        let count=0;w.fetch=async()=>{count++;return {ok:false,status:409,json:async()=>({error:'Вариант уже изменился. Обновите его.'})};};
+        form.elements.priceRub.value='0';d.getElementById('save-material').click();await tick();
+        assert.equal(count,0);assert.equal(d.getElementById('save-result').dataset.kind,'error');
+        form.elements.priceRub.value='275';d.getElementById('save-material').click();await tick();await tick();
+        assert.equal(count,1);assert.equal(form.elements.priceRub.value,'275');
+        assert.match(d.getElementById('save-result').textContent,/Вариант уже изменился/);
+        assert.equal(d.getElementById('save-material').textContent,'Сохранить вариант');
+        assert.equal(d.getElementById('save-material').disabled,false);
+    }finally{dom.window.close();}
+});
+test('library search and file assignment preserve unsaved variant fields',async()=>{
+    const {dom,w,openVariant}=await adminFixture();
+    try{
+        await openVariant();const d=w.document,form=d.getElementById('editor');
+        form.elements.desc.value='Не потерять описание';form.elements.desc.dispatchEvent(new w.Event('input',{bubbles:true}));
+        d.getElementById('files-search').value='Другой';d.getElementById('files-search-button').click();await tick();await tick();
+        assert.equal(form.elements.desc.value,'Не потерять описание');
+        const row=[...d.querySelectorAll('#file-library .order')].find(node=>node.textContent.includes('Другой.docx'));
+        [...row.querySelectorAll('button')].find(button=>button.textContent==='Выбрать решением').click();
+        assert.equal(form.elements.telegramFileId.value,'extra_file_id');
+        assert.equal(form.elements.desc.value,'Не потерять описание');
+        assert.equal(d.getElementById('save-result').hidden,true);
+    }finally{dom.window.close();}
+});
+test('student catalog separates institutions and specialties without mixing identical subject names',async()=>{
+    const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{url:'https://example.test',runScripts:'outside-only'});
+    try{
+        const w=dom.window;
+        const item={course:'1 курс',semester:'1 семестр',subject:'Математика',name:'Работа',variant:'1',desc:'',type:'free',available:true};
+        w.fetch=async()=>({ok:true,json:async()=>({
+            a:{...item,institution:'Вуз A',specialty:'Нефть'},
+            b:{...item,institution:'Вуз A',specialty:'Газ',name:'Работа Газ'},
+            c:{...item,institution:'Вуз B',specialty:'Нефть',name:'Работа другого вуза'}
+        })});
+        w.eval(fs.readFileSync(path.join(__dirname,'../public/app.js'),'utf8'));await tick();
+        w.document.querySelector('[data-action="selectInstitution"]').click();
+        const specialties=[...w.document.querySelectorAll('[data-action="selectSpecialty"]')];
+        assert.equal(specialties.length,2);
+        specialties.find(button=>button.textContent.includes('Газ')).click();
+        for(const action of ['selectCourse','selectSemester','selectSubject'])w.document.querySelector('[data-action="'+action+'"]').click();
+        const content=w.document.getElementById('app-view').textContent;
+        assert.match(content,/Работа Газ/);assert.doesNotMatch(content,/другого вуза/);
+    }finally{dom.window.close();}
+});
+
+test('task preview sends the selected variant rather than the first file in the work',async()=>{
+    const dom=new JSDOM(fs.readFileSync(path.join(__dirname,'../index.html'),'utf8'),{url:'https://example.test',runScripts:'outside-only'});
+    try{
+        const w=dom.window,requests=[];
+        const item={course:'1 курс',semester:'1 семестр',subject:'Математика',name:'ДЗ',desc:'',type:'free',available:true,hasTaskFile:true};
+        w.Telegram={WebApp:{initData:'signed',ready(){},expand(){},isVersionAtLeast:()=>false}};
+        w.fetch=async(url,options)=>{
+            if(url.endsWith('/catalog'))return {ok:true,json:async()=>({first:{...item,variant:'1 вариант'},second:{...item,variant:'2 вариант'}})};
+            requests.push(JSON.parse(options.body));return {ok:true,json:async()=>({queued:true,orderId:'preview'})};
+        };
+        w.eval(fs.readFileSync(path.join(__dirname,'../public/app.js'),'utf8'));await tick();
+        for(const action of ['selectCourse','selectSemester','selectSubject','openFileModal','openTaskInfo'])w.document.querySelector('[data-action="'+action+'"]').click();
+        assert.equal(requests.length,0);
+        [...w.document.querySelectorAll('[data-action="openVariantTask"]')].find(button=>button.textContent==='2 вариант').click();
         await tick();
-        assert.equal(calls.some(c=>c.options.method==='PUT'),false);
-        form.elements.code_variant.value='6';
-        form.elements.code_variant.dispatchEvent(new w.Event('input',{bubbles:true}));
-        form.elements.variant.value='6 вариант';
-        assert.equal(form.elements.materialCode.value,'0102110304_06');
-        form.dispatchEvent(new w.Event('submit',{cancelable:true}));
-        await tick();await tick();
-        const call=calls.find(c=>c.options.method==='PUT'),body=JSON.parse(call.options.body);
-        assert.equal(call.url,'/api/admin/catalog/0102110304_06');
-        assert.equal(body.createOnly,true);
-        assert.equal(body.materialCode,'0102110304_06');
-        assert.equal(body.telegramFileId,'');
-        assert.equal(d.getElementById('materials').value,'0102110304_06');
-        assert.equal(form.elements.variant.value,'6 вариант');
-    } finally {dom.window.close();}
-});
-test('admin assigns new code to legacy material using stable internal ID and renames all variants',async()=>{
-    const item={course:'1 курс',semester:'1 семестр',subject:'Математика',name:'Работа',variant:'1',desc:'',type:'free'};
-    const {dom,w,calls}=await adminFixture({legacy:item,second:{...item,variant:'2'}});
-    try {
-        const d=w.document,form=d.getElementById('editor');
-        for (const [key,value] of Object.entries({institution:'1',specialty:'2',course:'1',semester:'1',subject:'3',work:'4',variant:'1'})) form.elements['code_'+key].value=value;
-        form.elements.code_variant.dispatchEvent(new w.Event('input',{bubbles:true}));
-        form.dispatchEvent(new w.Event('submit',{cancelable:true}));await tick();await tick();
-        const put=calls.find(c=>c.options.method==='PUT');
-        assert.equal(put.url,'/api/admin/catalog/legacy');
-        assert.equal(JSON.parse(put.options.body).materialCode,'0102110304_01');
-        assert.equal(JSON.parse(put.options.body).createOnly,false);
-        const field=d.getElementById('rename-field');field.value='name';field.dispatchEvent(new w.Event('change'));
-        assert.match(d.getElementById('rename-button').textContent,/2/);
-        d.getElementById('rename-value').value='Самостоятельная';
-        d.getElementById('rename-button').click();await tick();await tick();
-        assert.equal(form.elements.name.value,'Самостоятельная');
-        assert.match(d.getElementById('materials').textContent,/Самостоятельная → 2/);
-        assert.equal(form.elements.id.value,'legacy');
-    } finally {dom.window.close();}
+        assert.equal(requests[0].fileId,'second');assert.equal(requests[0].preview,true);
+    }finally{dom.window.close();}
 });

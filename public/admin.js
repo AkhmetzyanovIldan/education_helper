@@ -1,243 +1,258 @@
 'use strict';
-const tg = window.Telegram?.WebApp;
-const status = document.getElementById('status');
-const form = document.getElementById('editor');
-const select = document.getElementById('materials');
-let items = {}, uploads = [], saving = false;
-async function request(path, method = 'GET', body) {
-    if (!tg?.initData) throw new Error('Откройте админку кнопкой бота из аккаунта @AxmIldan.');
-    const response = await fetch('/api/admin' + path, { method,
-        headers: { 'Content-Type':'application/json', 'X-Telegram-Init-Data':tg.initData },
-        ...(body ? { body:JSON.stringify(body) } : {}), signal:AbortSignal.timeout(25000) });
-    if (response.status === 403) throw new Error('Доступ разрешён только владельцу.');
-    const result = await response.json().catch(()=>({}));
-    if (!response.ok) throw new Error(result.error || 'Не удалось выполнить запрос. Откройте админку заново.');
+const tg=window.Telegram?.WebApp;
+const {levels,formattedCode,label:materialLabel}=window.HierarchyTools;
+const $=id=>document.getElementById(id);
+const form=$('editor');
+let view=null,busy=false,dirty=false,nameAction=null,libraryOffset=0,libraryQuery='',libraryCount=0,libraryDocs=[],ordersLoaded=false;
+async function request(path,method='GET',body){
+    if(!tg?.initData)throw new Error('Откройте админку кнопкой бота из аккаунта владельца.');
+    const response=await fetch('/api/admin'+path,{
+        method,headers:{'Content-Type':'application/json','X-Telegram-Init-Data':tg.initData},
+        ...(body!==undefined ? {body:JSON.stringify(body)} : {}),signal:AbortSignal.timeout(25000)
+    });
+    const result=await response.json().catch(()=>({}));
+    if(!response.ok)throw new Error(result.error || (response.status===403 ? 'Доступ разрешён только владельцу.' : 'Не удалось выполнить запрос. Откройте админку заново.'));
     return result;
 }
-function option(value, text) {
-    const node = document.createElement('option');
-    node.value = value; node.textContent = text; return node;
+function notice(message,kind='info',target=$('status')){
+    target.hidden=false;target.dataset.kind=kind;target.textContent=message;
 }
-
-const catalogTools = window.CatalogTools;
-const { parts, buildCode, parseCode, materialCode, formatCode, label: materialLabel, sameGroup } = catalogTools;
-let editingId = '', dirty = false, renaming = false;
-const editableFields = ['institution','specialty','course','semester','subject','name','variant','desc','type','priceStars','priceRub'];
-for (const [key,title,width] of parts) {
-    const label = document.createElement('label'); label.textContent = title + ' · ' + width + (width === 1 ? ' цифра' : ' цифры');
-    const input = document.createElement('input');
-    input.name = 'code_' + key; input.inputMode = 'numeric'; input.maxLength = width;
-    input.pattern = '[0-9]{1,' + width + '}'; input.placeholder = '0'.repeat(width);
-    label.append(input); document.getElementById('code-parts').append(label);
-}
-function codeValues() { return Object.fromEntries(parts.map(([key]) => [key,form.elements['code_'+key].value])); }
-function syncCode() {
-    const code = buildCode(codeValues());
-    form.elements.materialCode.value = code;
-    if (!editingId) form.elements.id.value = code;
-    const legacy = editingId && !materialCode(editingId,items[editingId]);
-    document.getElementById('code-hint').textContent = code
-        ? 'По частям: ' + formatCode(code) + '. Смена учётного ID сохраняет связь с прежними покупками.'
-        : legacy ? 'Старый ID: ' + editingId + '. Можно пока оставить его или заполнить все семь частей нового ID.'
-            : 'Заполните все семь частей. Семестр — номер внутри курса (обычно 1 или 2). Названия кнопок задаются ниже.';
-}
-function showDetails() {
-    const draft = Object.fromEntries(editableFields.map(key=>[key,form.elements[key].value]));
-    draft.materialCode = form.elements.materialCode.value;
-    document.getElementById('material-details').textContent = (editingId ? 'Редактируете' : 'Новый материал') +
-        (dirty ? ' · есть несохранённые изменения' : '') + ':\n' + materialLabel(editingId || 'ещё не задан',draft);
-}
-function renderSelector() {
-    const terms = document.getElementById('materials-search').value.toLocaleLowerCase('ru').trim().split(/\s+/).filter(Boolean);
-    const matches = Object.entries(items).filter(([id,item]) => {
-        const haystack = (materialLabel(id,item)+' '+id+' '+formatCode(materialCode(id,item))).toLocaleLowerCase('ru');
-        return terms.every(term=>haystack.includes(term));
-    }).sort(([id,a],[otherId,b])=>materialLabel(id,a).localeCompare(materialLabel(otherId,b),'ru',{numeric:true}));
-    select.replaceChildren(...matches.map(([id,item])=>option(id,materialLabel(id,item))));
-    if (!matches.some(([id])=>id===editingId)) {
-        select.prepend(option('',matches.length ? 'Выберите материал из результатов поиска' : 'Ничего не найдено'));
-        select.value = '';
-    } else select.value = editingId;
-    document.getElementById('materials-count').textContent = 'Найдено: ' + matches.length + ' из ' + Object.keys(items).length;
-}
-function suggestions() {
-    const all = Object.values(items);
-    for (const key of ['institution','specialty','course','semester','subject','name','variant']) {
-        const fields = ['institution','specialty','course','semester','subject','name'];
-        const level = fields.indexOf(key);
-        const relevant = all.filter(item => fields.slice(0,level < 0 ? fields.length : level).every(parent => !form.elements[parent].value || item[parent] === form.elements[parent].value));
-        const values = [...new Set(relevant.map(item=>item[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru',{numeric:true}));
-        document.getElementById(key+'-options').replaceChildren(...values.map(value=>option(value,value)));
+function errorMessage(error){return error.name==='TimeoutError' ? 'Сервер отвечает долго. Подтверждение не получено. Проверьте результат через «Обновить» перед повторной попыткой.' : error.message;}
+async function perform(action,target=$('status')){
+    if(busy)return;
+    busy=true;
+    const locked=[...document.querySelectorAll('button,input,select,textarea')].map(field=>({field,disabled:field.disabled}));
+    for(const {field} of locked)field.disabled=true;
+    try{await action();}
+    catch(error){notice(errorMessage(error),'error',target);if(target!==$('status'))notice(errorMessage(error),'error');}
+    finally{
+        for(const {field,disabled} of locked)if(field.isConnected)field.disabled=disabled;
+        busy=false;
+        $('files-prev').disabled=libraryOffset===0;$('files-next').disabled=libraryCount<100;
     }
 }
-function renamePreview() {
-    const source = items[editingId], field = document.getElementById('rename-field').value;
-    const affected = source ? Object.values(items).filter(item=>sameGroup(item,source,field)) : [];
-    document.getElementById('rename-scope').textContent = source
-        ? materialLabel(editingId,source) + '\nБудет изменено материалов: ' + affected.length
-        : 'Сначала выберите сохранённый материал.';
-    document.getElementById('rename-value').value = source?.[field] || '';
-    document.getElementById('rename-button').disabled = !source || renaming;
-    document.getElementById('rename-button').textContent = 'Переименовать (' + affected.length + ')';
+function mayLeave(){return !dirty || window.confirm('Есть несохранённые изменения варианта. Продолжить без сохранения?');}
+function button(text,action,id){
+    const node=document.createElement('button');node.type='button';node.textContent=text;
+    node.dataset.action=action;if(id)node.dataset.id=id;return node;
 }
-function mayLeave() {
-    return !dirty || window.confirm('В форме есть несохранённые изменения. Продолжить без сохранения?');
+function option(value,text){const node=document.createElement('option');node.value=value;node.textContent=text;return node;}
+function currentId(){return view?.node?.id || null;}
+function displayName(node){return String(node.number).padStart(2,'0')+' · '+node.name;}
+function findNode(id){return [view?.node,...(view?.children || [])].find(node=>node?.id===id);}
+function renderChildren(){
+    const container=$('nodes');container.replaceChildren();
+    const query=$('node-search').value.toLocaleLowerCase('ru').trim();
+    const children=view.children.filter(node=>(displayName(node)+' '+node.code).toLocaleLowerCase('ru').includes(query));
+    for(const node of children){
+        const row=document.createElement('div');row.className='node';
+        const open=button('','open',node.id);open.className='node-main';
+        const title=document.createElement('strong');title.textContent=displayName(node);
+        const info=document.createElement('small');info.textContent='ID '+node.code+(node.level===6 ? '' : ' · вариантов: '+node.variantCount);
+        open.append(title,info);
+        const actions=document.createElement('div');actions.className='node-actions';
+        actions.append(button('Изменить','rename',node.id));
+        const remove=button('Удалить','delete',node.id);remove.className='danger';actions.append(remove);
+        row.append(open,actions);container.append(row);
+    }
+    if(!children.length)container.textContent=query ? 'Ничего не найдено.' : 'Здесь пока пусто. Создайте первый раздел кнопкой выше.';
 }
-function edit(id, draft) {
+function addFileOptions(docs){
+    for(const key of ['telegramFileId','taskTelegramFileId']){
+        const field=form.elements[key];
+        for(const doc of docs)if(![...field.options].some(entry=>entry.value===doc.file_id))field.append(option(doc.file_id,doc.name));
+    }
+}
+function renderVariant(){
+    const item=view.item || {};
     form.reset();
-    editingId = id || '';
-    const item = draft || items[id] || {type:'free'};
-    form.elements.id.value = id || '';
-    for (const key of editableFields) form.elements[key].value = item[key] ?? '';
-    form.elements.disabled.checked = Boolean(item.disabled);
-    const values = parseCode(materialCode(id,item)) || {};
-    for (const [key] of parts) form.elements['code_'+key].value = values[key] || '';
-    if (draft) form.elements.code_variant.value = '';
-    for (const key of ['telegramFileId','taskTelegramFileId']) {
-        const field = form.elements[key];
-        field.replaceChildren(option('','Не выбран'));
-        for (const doc of uploads) field.append(option(doc.file_id,doc.name + (doc.size ? ' (' + Math.ceil(doc.size/1024) + ' КБ)' : '')));
-        if (item[key] && !uploads.some(doc=>doc.file_id===item[key])) field.append(option(item[key],'Текущий файл'));
-        field.value = item[key] || '';
+    $('material-code').value=item.materialCode || view.node.code;
+    $('variant-path').textContent=view.path.map(node=>node.name).join(' → ');
+    for(const key of ['desc','type','priceStars','priceRub'])form.elements[key].value=item[key] ?? (key==='type' ? 'free' : '');
+    form.elements.disabled.checked=Boolean(item.disabled);
+    for(const key of ['telegramFileId','taskTelegramFileId']){
+        form.elements[key].replaceChildren(option('','Не выбран'));
+        const id=item[key];
+        if(id){const doc=(view.files || []).find(file=>file.file_id===id);form.elements[key].append(option(id,doc?.name || 'Ранее выбранный файл'));form.elements[key].value=id;}
     }
-    dirty = Boolean(draft);
-    syncCode(); showDetails(); suggestions(); renamePreview();
-    document.getElementById('new-variant').disabled = !id;
+    $('price-fields').hidden=item.type!=='paid';
+    $('payment-hint').textContent=view.paymentProvider==='yookassa'
+        ? 'В приложении выбран способ оплаты ЮKassa. Для продажи используется цена в рублях.'
+        : 'В приложении выбран способ оплаты Telegram Stars. Рублёвую цену можно сохранить заранее; она начнёт использоваться после переключения оплаты на ЮKassa.';
+    $('save-result').hidden=true;$('save-material').textContent='Сохранить вариант';
+    dirty=false;
 }
-async function refresh(preferredId = editingId || select.value) {
-    status.textContent = 'Загрузка…';
-    try {
-        const catalog = await request('/catalog');
-        items = catalog.items; uploads = catalog.uploads;
-        const chosen = Object.hasOwn(items,preferredId) ? preferredId : Object.keys(items)[0] || '';
-        edit(chosen); renderSelector();
-        const orders = await request('/orders'), container = document.getElementById('orders');
-        container.replaceChildren();
-        const labels = {pending:'Ожидает оплаты',checkout:'Подтверждение оплаты',paid:'В очереди выдачи',sent:'Отправлен',refunded:'Возвращён',canceled:'Отменён'};
-        for (const order of orders) {
-            const price = order.currency === 'RUB' ? (order.amount/100).toFixed(2)+' ₽' : order.amount+' ★';
-            const row = document.createElement('div'); row.className = 'order';
-            for (const text of [order.title, 'Заказ: ' + order.id, 'Пользователь: ' + order.user_id,
-                (labels[order.status] || order.status) + ' · ' + price + ' · попыток: ' + order.attempts]) {
-                const p = document.createElement('p'); p.textContent = text; row.append(p);
-            }
-            if (['paid','sent'].includes(order.status)) {
-                for (const action of ['resend',...(order.amount>0 ? ['refund'] : [])]) {
-                    const button = document.createElement('button');
-                    button.textContent = action === 'resend' ? 'Отправить повторно' : 'Вернуть ' + price;
-                    button.addEventListener('click',async()=>{
-                        if (action === 'refund' && !window.confirm('Вернуть ' + price + ' по заказу ' + order.id + '?')) return;
-                        button.disabled = true;
-                        try { await request('/orders/'+order.id+'/'+action,'POST',{}); await refresh(); }
-                        catch(e) { status.textContent=e.message; button.disabled=false; }
-                    });
-                    row.append(button);
-                }
-            }
-            container.append(row);
+async function loadView(id=null){
+    const data=await request('/structure'+(id ? '?parent='+encodeURIComponent(id) : ''));
+    view=data;dirty=false;nameAction=null;$('name-form').hidden=true;
+    $('breadcrumbs').replaceChildren(button('Все учебные заведения','root'));
+    for(const node of data.path){
+        const crumb=button(node.name,'open',node.id);
+        if(node.id===id)crumb.setAttribute('aria-current','page');
+        $('breadcrumbs').append(crumb);
+    }
+    $('view-title').textContent=data.node ? data.node.name : 'Учебные заведения';
+    $('view-code').textContent=data.path.length ? 'ID: '+formattedCode(data.path) : 'Создавайте разделы и открывайте их, чтобы перейти на следующую ступень.';
+    $('current-actions').hidden=!data.node;
+    const variant=data.node?.level===6;
+    $('branch-panel').hidden=variant;$('variant-panel').hidden=!variant;
+    $('node-search').value='';
+    if(variant){
+        renderVariant();libraryOffset=0;libraryQuery='';$('files-search').value='';
+    }else{
+        const next=levels[(data.node?.level ?? -1)+1];
+        $('create-node').textContent='Создать: '+next.title.toLocaleLowerCase('ru');
+        $('level-hint').textContent=next.plural+'. Номера назначаются автоматически внутри этого раздела, начиная с 01.';
+        renderChildren();
+    }
+    $('panel').hidden=false;
+    notice(variant ? 'Открыт вариант. Здесь настраиваются цена и файлы.' : 'Откройте раздел или создайте новый.');
+    if(variant)await loadLibrary();
+}
+function navigate(id){if(!busy && mayLeave())void perform(()=>loadView(id));}
+function openNameForm(node=null){
+    if(busy || !mayLeave())return;
+    nameAction=node ? {mode:'rename',node} : {mode:'create',parentId:currentId(),requestKey:crypto.randomUUID()};
+    $('name-form-title').textContent=node ? 'Изменить название: '+node.name : 'Создать: '+levels[(view.node?.level ?? -1)+1].title.toLocaleLowerCase('ru');
+    $('node-name').value=node?.name || '';
+    $('save-name').textContent=node ? 'Сохранить название' : 'Создать';
+    $('name-form-hint').textContent=node ? 'ID и покупки сохранятся. Новое название будет показано у всех вложенных материалов.' : 'Номер будет назначен автоматически. Вручную вводить ID не нужно.';
+    $('name-result').hidden=true;$('name-form').hidden=false;
+    $('node-name').focus();
+}
+async function removeNode(node){
+    if(busy || !mayLeave())return;
+    if(!window.confirm('Удалить «'+node.name+'»'+(node.level<6 ? ' и все вложенные разделы' : '')+'?\nВариантов: '+node.variantCount+'.\nОни исчезнут из каталога. Прежние покупки и документы сохранятся.'))return;
+    await perform(async()=>{
+        const result=await request('/structure/'+node.id,'DELETE',{expectedRevision:view.revision});
+        const destination=currentId()===node.id ? result.parentId : currentId();
+        await loadView(destination);notice('Раздел удалён из каталога.','success');
+    });
+}
+document.addEventListener('click',event=>{
+    const target=event.target.closest('[data-action]');if(!target || busy)return;
+    const id=target.dataset.id;
+    if(target.dataset.action==='root')navigate(null);
+    if(target.dataset.action==='open')navigate(id);
+    if(target.dataset.action==='rename')openNameForm(findNode(id));
+    if(target.dataset.action==='delete')void removeNode(findNode(id));
+});
+$('refresh').addEventListener('click',()=>navigate(currentId()));
+$('create-node').addEventListener('click',()=>openNameForm());
+$('rename-current').addEventListener('click',()=>openNameForm(view.node));
+$('delete-current').addEventListener('click',()=>removeNode(view.node));
+$('node-search').addEventListener('input',renderChildren);
+$('cancel-name').addEventListener('click',()=>{$('name-form').hidden=true;nameAction=null;});
+$('node-name').addEventListener('input',()=>{if(nameAction?.mode==='create')nameAction.requestKey=crypto.randomUUID();});
+$('name-form').addEventListener('submit',event=>{
+    event.preventDefault();if(busy || !nameAction)return;
+    const name=$('node-name').value.trim(),action=nameAction;
+    if(!name || name.length>200){notice('Введите название от 1 до 200 символов.','error',$('name-result'));return;}
+    void perform(async()=>{
+        notice('Сохраняем…','pending',$('name-result'));
+        if(action.mode==='create'){
+            const result=await request('/structure','POST',{parentId:action.parentId,name,requestKey:action.requestKey});
+            await loadView(result.node.id);notice('Создано: '+name+'. Номер назначен автоматически.','success');
+        }else{
+            await request('/structure/'+action.node.id,'PATCH',{name,expectedVersion:action.node.version});
+            await loadView(currentId());notice('Название сохранено.','success');
         }
-        if (!orders.length) container.textContent = 'Заказов пока нет.';
-        document.getElementById('panel').hidden = false;
-        status.textContent = 'Доступ владельца подтверждён.';
-        await loadLibrary();
-    } catch(e) { status.textContent=e.message; }
+    },$('name-result'));
+});
+function changedVariant(){
+    dirty=true;$('save-result').hidden=true;$('save-material').textContent='Сохранить вариант';
+    $('price-fields').hidden=form.elements.type.value!=='paid';
 }
-form.addEventListener('submit',async event=>{
-    event.preventDefault();
-    if(saving || renaming) return;
-    saving=true;
-    const button=document.getElementById('save-material'); button.disabled=true;
-    try {
-        syncCode();
-        const anyCode = Object.values(codeValues()).some(value=>value.trim());
-        if ((!editingId || anyCode || materialCode(editingId,items[editingId])) && !form.elements.materialCode.value) throw new Error('Заполните все семь частей ID цифрами указанной длины.');
-        const body=Object.fromEntries(new FormData(form));
-        body.materialCode = body.materialCode || null;
-        body.createOnly = !editingId;
-        body.priceStars=body.priceStars ? Number(body.priceStars) : null;
-        body.priceRub=body.priceRub ? Number(body.priceRub) : null;
-        body.disabled=form.elements.disabled.checked;
-        await request('/catalog/'+encodeURIComponent(body.id),'PUT',body);
-        dirty=false;
-        await refresh(body.id); status.textContent='Материал сохранён. Кнопки каталога обновятся при повторном открытии приложения.';
-    } catch(e) {status.textContent=e.message;}
-    finally {saving=false;button.disabled=false;}
+form.addEventListener('input',changedVariant);form.addEventListener('change',changedVariant);
+form.addEventListener('submit',event=>{
+    event.preventDefault();if(busy || view?.node?.level!==6)return;
+    const invalid=[...form.elements].find(field=>field.willValidate && !field.validity.valid);
+    if(invalid){notice('Проверьте поле «'+(invalid.labels?.[0]?.textContent.trim() || invalid.name)+'». Цена — целое число от 1 до 100000 или пустое поле.','error',$('save-result'));return;}
+    const body={expectedVersion:view.node.version,disabled:form.elements.disabled.checked};
+    for(const key of ['desc','type','telegramFileId','taskTelegramFileId'])body[key]=form.elements[key].value;
+    for(const key of ['priceStars','priceRub'])body[key]=form.elements[key].value ? Number(form.elements[key].value) : null;
+    void perform(async()=>{
+        const button=$('save-material');button.textContent='Сохраняем…';button.setAttribute('aria-busy','true');
+        notice('Сохраняем вариант. Дождитесь ответа сервера.','pending',$('save-result'));
+        let saved=false;
+        try{
+            const result=await request('/structure/'+view.node.id+'/variant','PUT',body);
+            if(result.saved!==true)throw new Error('Сервер не подтвердил сохранение. Обновите вариант и проверьте данные.');
+            updateSavedFileUsage(view.item,result.item);
+            view.node={...view.node,...result.node};view.item=result.item;view.revision=result.revision;dirty=false;saved=true;
+            notice('Вариант сохранён. ID: '+result.item.materialCode+'.','success',$('save-result'));
+            notice('Цена и файлы варианта сохранены.','success');
+            button.textContent='✓ Сохранено';
+        }finally{button.removeAttribute('aria-busy');button.textContent=saved ? '✓ Сохранено' : 'Сохранить вариант';}
+    },$('save-result'));
 });
 
-form.addEventListener('input',()=>{dirty=true;syncCode();showDetails();suggestions();});
-form.addEventListener('change',()=>{dirty=true;showDetails();});
-document.getElementById('materials-search').addEventListener('input',renderSelector);
-select.addEventListener('change',()=>{
-    if (!select.value) return;
-    if (!mayLeave()) {renderSelector();return;}
-    edit(select.value);
-});
-document.getElementById('refresh').addEventListener('click',()=>{if(mayLeave()) refresh();});
-document.getElementById('new').addEventListener('click',()=>{if(mayLeave()){edit('');renderSelector();form.elements.code_institution.focus();}});
-document.getElementById('new-variant').addEventListener('click',()=>{
-    if (!items[editingId] || !mayLeave()) return;
-    const source = items[editingId];
-    const draft = {...source,materialCode:materialCode(editingId,source),variant:'',telegramFileId:'',taskTelegramFileId:''};
-    edit('',draft);renderSelector();
-    status.textContent='Укажите код и название нового варианта, выберите его файлы и сохраните материал.';
-    form.elements.code_variant.focus();
-});
-document.getElementById('rename-field').addEventListener('change',renamePreview);
-document.getElementById('rename-button').addEventListener('click',async()=>{
-    if (saving || renaming || !items[editingId]) return;
-    if (dirty) {status.textContent='Сначала сохраните изменения материала. Затем переименуйте весь раздел.';return;}
-    const field=document.getElementById('rename-field').value;
-    const newName=document.getElementById('rename-value').value.trim();
-    if (!newName) {status.textContent='Введите новое название.';return;}
-    renaming=true;document.getElementById('rename-button').disabled=true;
-    try {
-        const result=await request('/catalog/rename','POST',{sourceId:editingId,field,newName,expectedName:items[editingId][field]});
-        await refresh();status.textContent='Название сохранено. Изменено материалов: '+result.count+'.';
-    } catch(e) {status.textContent=e.message;}
-    finally {renaming=false;document.getElementById('rename-button').disabled=!items[editingId];}
-});
-
-// File inventory is independent of the editor: searches never reset unsaved fields.
-let uploadOffset=0, uploadQuery='';
-function selectUpload(key,doc) {
-    const field=form.elements[key];
-    if(![...field.options].some(o=>o.value===doc.file_id)) field.append(option(doc.file_id,doc.name));
-    field.value=doc.file_id;dirty=true;showDetails();
-    status.textContent='Файл выбран. Нажмите «Сохранить материал», чтобы применить.';
+function updateSavedFileUsage(previous,item){
+    const oldLabel=materialLabel(previous),newLabel=materialLabel(item);
+    for(const doc of libraryDocs){
+        doc.usedIn=(doc.usedIn || []).filter(label=>label!==oldLabel);
+        if(item.telegramFileId===doc.file_id || item.taskTelegramFileId===doc.file_id)doc.usedIn.push(newLabel);
+        const text=[...$('file-library').querySelectorAll('[data-file-usage]')].find(node=>node.dataset.fileUsage===doc.file_id);
+        if(text)text.textContent=doc.usedIn.length ? 'Используется: '+doc.usedIn.join('; ') : 'Не назначен вариантам';
+    }
 }
-async function loadLibrary() {
-    const container=document.getElementById('file-library');
-    if(!container) return;
-    try {
-        const data=await request('/uploads?q='+encodeURIComponent(uploadQuery)+'&offset='+uploadOffset);
-        container.replaceChildren();
-        document.getElementById('storage-group').textContent=data.storageGroup ? 'Группа загрузки подключена: '+data.storageGroup : 'Группа ещё не подключена. Добавьте бота администратором в закрытую группу и отправьте /bind_storage от своего аккаунта.';
-        for(const doc of data.uploads) {
-            const row=document.createElement('div');row.className='order';
-            const title=document.createElement('strong');title.textContent=doc.name;row.append(title);
-            const used=Object.entries(items).filter(([,item])=>item.telegramFileId===doc.file_id || item.taskTelegramFileId===doc.file_id).map(([id,item])=>materialLabel(id,item));
-            const info=document.createElement('p');info.textContent=(doc.folder || 'Без папки')+' · '+(used.length ? 'Используется: '+used.join(', ') : 'Не назначен материалам');row.append(info);
-            const folder=document.createElement('input');folder.value=doc.folder || '';folder.maxLength=200;folder.placeholder='Папка: 1 курс / Математика';folder.setAttribute('aria-label','Папка для '+doc.name);row.append(folder);
-            for(const [label,handler] of [
-                ['Сохранить папку',async()=>{await request('/uploads/'+encodeURIComponent(doc.file_id),'PUT',{folder:folder.value});await loadLibrary();}],
-                ['Выбрать решением',async()=>selectUpload('telegramFileId',doc)],
-                ['Выбрать заданием',async()=>selectUpload('taskTelegramFileId',doc)]
-            ]) {
-                const button=document.createElement('button');button.type='button';button.textContent=label;
-                button.addEventListener('click',async()=>{button.disabled=true;try{await handler();}catch(e){status.textContent=e.message;}finally{button.disabled=false;}});
-                row.append(button);
-            }
-            container.append(row);
+
+function selectFile(key,doc){
+    if(busy || view?.node?.level!==6)return;
+    addFileOptions([doc]);form.elements[key].value=doc.file_id;changedVariant();
+    notice('Файл выбран для «'+view.node.name+'». Нажмите «Сохранить вариант».','info');
+}
+async function loadLibrary(){
+    if(view?.node?.level!==6)return;
+    const data=await request('/uploads?q='+encodeURIComponent(libraryQuery)+'&offset='+libraryOffset);
+    libraryDocs=data.uploads;
+    libraryCount=data.uploads.length;
+    addFileOptions(data.uploads);
+    $('storage-group').textContent=data.storageGroup ? 'Группа загрузки подключена.' : 'Группа ещё не подключена. Можно отправить документы в личный чат бота.';
+    const container=$('file-library');container.replaceChildren();
+    for(const doc of data.uploads){
+        const row=document.createElement('div');row.className='order';
+        const title=document.createElement('strong');title.textContent=doc.name;row.append(title);
+        const used=document.createElement('p');used.dataset.fileUsage=doc.file_id;used.textContent=doc.usedIn?.length ? 'Используется: '+doc.usedIn.join('; ') : 'Не назначен вариантам';row.append(used);
+        const label=document.createElement('label');label.textContent='Метка для поиска';
+        const folder=document.createElement('input');folder.value=doc.folder || '';folder.maxLength=200;label.append(folder);row.append(label);
+        for(const [text,handler] of [
+            ['Сохранить метку',()=>perform(async()=>{await request('/uploads/'+encodeURIComponent(doc.file_id),'PUT',{folder:folder.value});notice('Метка файла сохранена.','success');})],
+            ['Выбрать решением',()=>selectFile('telegramFileId',doc)],
+            ['Выбрать заданием',()=>selectFile('taskTelegramFileId',doc)]
+        ]){
+            const button=document.createElement('button');button.type='button';button.textContent=text;button.addEventListener('click',handler);row.append(button);
         }
-        if(!data.uploads.length) container.textContent='Файлы не найдены.';
-        document.getElementById('files-prev').disabled=uploadOffset===0;
-        document.getElementById('files-next').disabled=data.uploads.length<100;
-        document.getElementById('files-page').textContent='Страница '+(uploadOffset/100+1);
-    } catch(e) {status.textContent=e.message;}
+        container.append(row);
+    }
+    if(!data.uploads.length)container.textContent='Документы не найдены. Загрузите файл боту и обновите библиотеку.';
+    $('files-prev').disabled=libraryOffset===0;$('files-next').disabled=data.uploads.length<100;
+    $('files-page').textContent='Страница '+(libraryOffset/100+1);
 }
-document.getElementById('files-search-button').addEventListener('click',()=>{uploadQuery=document.getElementById('files-search').value.trim();uploadOffset=0;loadLibrary();});
-document.getElementById('files-search').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();document.getElementById('files-search-button').click();}});
-document.getElementById('files-prev').addEventListener('click',()=>{uploadOffset=Math.max(0,uploadOffset-100);loadLibrary();});
-document.getElementById('files-next').addEventListener('click',()=>{uploadOffset+=100;loadLibrary();});
-
-tg?.ready(); tg?.expand(); refresh();
+$('files-search-button').addEventListener('click',()=>{if(busy)return;libraryQuery=$('files-search').value.trim();libraryOffset=0;void perform(loadLibrary);});
+$('files-search').addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();$('files-search-button').click();}});
+$('files-prev').addEventListener('click',()=>{if(busy || libraryOffset===0)return;libraryOffset=Math.max(0,libraryOffset-100);void perform(loadLibrary);});
+$('files-next').addEventListener('click',()=>{if(busy)return;libraryOffset+=100;void perform(loadLibrary);});
+async function loadOrders(){
+    const orders=await request('/orders'),container=$('orders');container.replaceChildren();
+    const labels={pending:'Ожидает оплаты',checkout:'Подтверждение оплаты',paid:'В очереди выдачи',sent:'Отправлен',refunded:'Возвращён',canceled:'Отменён'};
+    for(const order of orders){
+        const price=order.currency==='RUB' ? (order.amount/100).toFixed(2)+' ₽' : order.amount+' ★';
+        const row=document.createElement('div');row.className='order';
+        for(const text of [order.title,'Заказ: '+order.id,'Пользователь: '+order.user_id,(labels[order.status] || order.status)+' · '+price]){
+            const p=document.createElement('p');p.textContent=text;row.append(p);
+        }
+        if(['paid','sent'].includes(order.status))for(const action of ['resend',...(order.amount>0 ? ['refund'] : [])]){
+            const button=document.createElement('button');button.textContent=action==='resend' ? 'Отправить повторно' : 'Вернуть '+price;
+            button.addEventListener('click',()=>{
+                if(busy || (action==='refund' && !window.confirm('Вернуть '+price+' по заказу '+order.id+'?')))return;
+                void perform(async()=>{await request('/orders/'+order.id+'/'+action,'POST',{});await loadOrders();notice(action==='resend' ? 'Файл поставлен в очередь.' : 'Возврат обработан.','success');});
+            });row.append(button);
+        }
+        container.append(row);
+    }
+    if(!orders.length)container.textContent='Заказов пока нет.';ordersLoaded=true;
+}
+$('load-orders').addEventListener('click',()=>perform(loadOrders));
+$('orders-panel').addEventListener('toggle',()=>{if($('orders-panel').open && !ordersLoaded && !busy)void perform(loadOrders);});
+tg?.ready();tg?.expand();void perform(()=>loadView());

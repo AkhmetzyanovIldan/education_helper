@@ -1,9 +1,8 @@
 'use strict';
 const { randomUUID } = require('node:crypto');
-const { materialCode, sameGroup } = require('../public/catalog-tools');
-const { CatalogError } = require('./catalog-error');
+const {Hierarchy,schema:hierarchySchema}=require('./hierarchy');
 class Store {
-    constructor(pool) { this.pool = pool; }
+    constructor(pool) { this.pool = pool; this.hierarchy = new Hierarchy(this); }
     async init() {
         await this.pool.query(`
             CREATE TABLE IF NOT EXISTS orders (
@@ -33,6 +32,7 @@ class Store {
             CREATE TABLE IF NOT EXISTS support_messages (message_id BIGINT PRIMARY KEY, user_id BIGINT NOT NULL);
             CREATE TABLE IF NOT EXISTS rate_limits (key TEXT PRIMARY KEY, count INTEGER NOT NULL, expires TIMESTAMPTZ NOT NULL);
         `);
+        await this.pool.query(hierarchySchema);
     }
     async limit(key, maximum = 12) {
         const { rows } = await this.pool.query(`INSERT INTO rate_limits VALUES ($1,1,now()+interval '1 minute')
@@ -102,7 +102,10 @@ class Store {
     async recent(user) { return (await this.pool.query("SELECT * FROM orders WHERE user_id=$1 AND status IN ('paid','sent') AND amount>0 ORDER BY created_at DESC LIMIT 10", [user])).rows; }
     async owner() { return (await this.pool.query("SELECT user_id FROM administrators WHERE role='owner'")).rows[0]?.user_id; }
     async enroll(user) { await this.pool.query("INSERT INTO administrators VALUES ('owner',$1) ON CONFLICT DO NOTHING",[user]); return String(await this.owner())===String(user); }
-    async catalog(base, client = this.pool) { return { ...base, ...Object.fromEntries((await client.query('SELECT * FROM catalog_overrides')).rows.map(r=>[r.file_id,r.item])) }; }
+    async catalog(base, client = this.pool) {
+        const items={ ...base, ...Object.fromEntries((await client.query('SELECT * FROM catalog_overrides')).rows.map(r=>[r.file_id,r.item])) };
+        return Object.fromEntries(Object.entries(items).filter(([,item])=>!item.archived));
+    }
     async editCatalog(callback) {
         const client = await this.pool.connect();
         try {
@@ -114,31 +117,6 @@ class Store {
             return result;
         } catch (error) { await client.query('ROLLBACK'); throw error; }
         finally { client.release(); }
-    }
-    async saveItem(id,item,base = {},{createOnly = false} = {}) {
-        return this.editCatalog(async client => {
-            const items = await this.catalog(base,client);
-            if (createOnly && Object.hasOwn(items,id)) throw new CatalogError('Такой ID уже занят. Выберите другой номер варианта или работы.');
-            const code = materialCode(id,item);
-            const duplicate = code && Object.entries(items).find(([otherId,other]) => otherId !== id && (materialCode(otherId,other) === code || otherId === code));
-            if (duplicate) throw new CatalogError('Этот ID уже назначен другому материалу. Существующий материал не изменён.');
-            await client.query('INSERT INTO catalog_overrides VALUES ($1,$2) ON CONFLICT(file_id) DO UPDATE SET item=$2',[id,JSON.stringify(item)]);
-        });
-    }
-    async renameGroup(base,sourceId,field,newName,expectedName) {
-        return this.editCatalog(async client => {
-            const items = await this.catalog(base,client), source = items[sourceId];
-            if (!source) throw new CatalogError('Материал не найден.',404);
-            if (source[field] !== expectedName) throw new CatalogError('Название уже изменилось. Обновите список и повторите.');
-            if (source[field] === newName) return 0;
-            const target = { ...source,[field]:newName };
-            if (Object.values(items).some(item => sameGroup(item,target,field))) throw new CatalogError('Раздел с таким названием уже существует. Выберите другое название, чтобы не объединить разные работы.');
-            const affected = Object.entries(items).filter(([,item]) => sameGroup(item,source,field));
-            for (const [id,item] of affected) {
-                await client.query('INSERT INTO catalog_overrides VALUES ($1,$2) ON CONFLICT(file_id) DO UPDATE SET item=$2',[id,JSON.stringify({...item,[field]:newName})]);
-            }
-            return affected.length;
-        });
     }
     async storageGroup() { return (await this.pool.query('SELECT chat_id FROM storage_group WHERE slot=1')).rows[0]?.chat_id; }
     async bindStorage(chat) { await this.pool.query('INSERT INTO storage_group VALUES(1,$1) ON CONFLICT(slot) DO UPDATE SET chat_id=$1',[chat]); }

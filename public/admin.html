@@ -5,63 +5,63 @@
 <title>Админка — Помощник нефтяник РФ</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link rel="stylesheet" href="/admin.css">
-<script src="/catalog-tools.js" defer></script>
+<script src="/hierarchy-tools.js" defer></script>
 <script src="/admin.js" defer></script>
 </head>
 <body><main>
-<header><h1>Управление материалами</h1><a href="/">Каталог студента →</a></header>
-<p id="status" role="status">Проверяем доступ владельца…</p>
+<header><h1>Управление каталогом</h1><a href="/">Каталог студента →</a></header>
+<p id="status" class="notice" role="status" aria-live="polite">Проверяем доступ владельца…</p>
 <div id="panel" hidden>
-<nav><button id="refresh" type="button">Обновить</button><button id="new" type="button">Новый материал</button><button id="new-variant" type="button">Новый вариант выбранной работы</button></nav>
-<section><h2>Материалы</h2><p>Кнопки каталога создаются из полей «Предмет», «Название работы» и «Вариант». Чтобы добавить кнопку, создайте и сохраните материал с новым названием. Документы загружайте в подключённую группу или личный чат бота, затем нажмите «Обновить». Фото отправляйте как файл.</p>
-<label>Найти материал<input id="materials-search" type="search" placeholder="Предмет, курс, работа, вариант или ID"></label>
-<p id="materials-count" role="status"></p>
-<select id="materials" aria-label="Материал"></select>
-<div id="material-details" aria-live="polite"></div>
-<form id="editor">
-<input name="id" type="hidden">
-<fieldset><legend>ID материала</legend>
-<p>Схема: УЗ 00 · специальность 00 · курс 0 · семестр 0 · предмет 00 · работа 00 · вариант _00. Однозначные номера дополняются нулём.</p>
-<div id="code-parts" class="code-grid"></div>
-<label>Собранный ID<input name="materialCode" readonly placeholder="Заполните части кода"></label>
-<p id="code-hint"></p>
-</fieldset>
-<div class="grid">
-<label>Учебное заведение (название для учёта)<input name="institution" maxlength="200" list="institution-options"></label>
-<label>Специальность (название для учёта)<input name="specialty" maxlength="200" list="specialty-options"></label>
+<nav id="breadcrumbs" aria-label="Путь в каталоге"></nav>
+<section>
+<div class="section-heading"><div><h2 id="view-title"></h2><p id="view-code"></p></div><button id="refresh" type="button">Обновить</button></div>
+<nav id="current-actions" hidden><button id="rename-current" type="button">Изменить название</button><button id="delete-current" class="danger" type="button">Удалить</button></nav>
+<div id="branch-panel">
+<p id="level-hint"></p>
+<button id="create-node" type="button">Создать</button>
+<label>Найти в этом разделе<input id="node-search" type="search" placeholder="Название или номер"></label>
+<div id="nodes"></div>
 </div>
-<div class="grid">
-<label>Курс<input name="course" required maxlength="200" list="course-options"></label>
-<label>Семестр<input name="semester" required maxlength="200" list="semester-options"></label>
-<label>Предмет<input name="subject" required maxlength="200" list="subject-options"></label>
-<label>Название работы<input name="name" required maxlength="200" list="name-options"></label>
-<label>Вариант<input name="variant" required maxlength="200" list="variant-options"></label>
-<label>Доступ<select name="type"><option value="free">Бесплатно</option><option value="paid">Платно</option></select></label>
-</div>
-<label>Описание задания<textarea name="desc" rows="4" maxlength="3000"></textarea></label>
-<label>Цена в Stars (пусто = оплата отключена)<input name="priceStars" type="number" min="1" max="100000" step="1"></label>
-<label>Цена в рублях для ЮKassa (пусто = оплата отключена)<input name="priceRub" type="number" min="1" max="100000" step="1"></label>
-<label>Файл решения<select name="telegramFileId"></select></label>
-<label>Файл задания (пусто = показывать описание)<select name="taskTelegramFileId"></select></label>
-<label class="check"><input name="disabled" type="checkbox"> Временно отключить выдачу и оплату</label>
-<p>Изменение полей выше применяется только к этому материалу. Чтобы переименовать предмет или работу вместе со всеми вариантами, используйте блок ниже.</p>
-<button id="save-material" type="submit">Сохранить материал</button>
+<form id="name-form" hidden novalidate>
+<h3 id="name-form-title"></h3>
+<label>Название<input id="node-name" name="nodeName" required maxlength="200" autocomplete="off"></label>
+<p id="name-form-hint">Номер будет назначен автоматически.</p>
+<nav><button type="submit" id="save-name">Создать</button><button type="button" id="cancel-name">Отмена</button></nav>
+<p id="name-result" role="status" hidden></p>
 </form>
-<datalist id="institution-options"></datalist><datalist id="specialty-options"></datalist>
-<datalist id="course-options"></datalist><datalist id="semester-options"></datalist>
-<datalist id="subject-options"></datalist><datalist id="name-options"></datalist><datalist id="variant-options"></datalist>
 </section>
-<section><h2>Переименовать предмет или работу</h2>
-<p>Выберите материал выше. Предмет переименуется для всех его работ в этом курсе и семестре; работа — для всех её вариантов. Учебное заведение и специальность также учитываются. ID и покупки сохранятся.</p>
-<label>Что переименовать<select id="rename-field"><option value="subject">Предмет со всеми работами</option><option value="name">Работу со всеми вариантами</option></select></label>
-<p id="rename-scope"></p>
-<label>Новое название<input id="rename-value" maxlength="200"></label>
-<button id="rename-button" type="button">Переименовать</button>
+<div id="variant-panel" hidden>
+<section>
+<h2>Файлы и цена варианта</h2>
+<p id="variant-path"></p>
+<form id="editor" novalidate>
+<label>ID материала<input id="material-code" readonly></label>
+<p>Этот ID назначен автоматически. Названия ступеней меняются кнопкой «Изменить название» в нужном разделе.</p>
+<label>Описание задания<textarea name="desc" rows="4" maxlength="3000"></textarea></label>
+<label>Доступ<select name="type"><option value="free">Бесплатно</option><option value="paid">Платно</option></select></label>
+<p id="payment-hint"></p>
+<div id="price-fields" class="grid">
+<label>Цена в рублях для ЮKassa<input name="priceRub" type="number" min="1" max="100000" step="1"></label>
+<label>Цена в Stars<input name="priceStars" type="number" min="1" max="100000" step="1"></label>
+</div>
+<label>Файл решения<select name="telegramFileId"></select></label>
+<label>Файл задания (пусто — показывать описание)<select name="taskTelegramFileId"></select></label>
+<label class="check"><input name="disabled" type="checkbox"> Временно отключить выдачу и оплату этого варианта</label>
+<p>Выберите документы в библиотеке ниже, затем сохраните вариант. Для платного варианта нужна цена выбранного способа оплаты.</p>
+<button id="save-material" type="submit">Сохранить вариант</button>
+<p id="save-result" class="notice" role="status" aria-live="polite" hidden></p>
+</form>
 </section>
-<section><h2>Библиотека файлов</h2><p id="storage-group"></p>
-<label>Поиск по имени или папке<input id="files-search" type="search" maxlength="200" placeholder="Например: математика"></label>
+<section id="library-panel">
+<h2>Библиотека файлов</h2>
+<p id="storage-group"></p>
+<p>Документы загружайте в подключённую группу или личный чат бота. Фото отправляйте как файл. Выбранный документ назначается только открытому варианту.</p>
+<label>Поиск по имени или метке<input id="files-search" type="search" maxlength="200" placeholder="Например: математика"></label>
 <button id="files-search-button" type="button">Найти</button>
-<div id="file-library"></div><nav><button id="files-prev" type="button">← Назад</button><span id="files-page"></span><button id="files-next" type="button">Далее →</button></nav></section>
-<section><h2>Последние 100 заказов</h2><p>Возврат возвращает полную сумму через исходный способ оплаты. Уже полученный документ из устройства студента удалить нельзя.</p><div id="orders"></div></section>
-<section><h2>Поддержка</h2><p>Вопросы студентов приходят в ваш личный чат с ботом. Нажмите «Ответить» на вопрос и отправьте текст — бот передаст его студенту.</p></section>
+<div id="file-library"></div>
+<nav><button id="files-prev" type="button">← Назад</button><span id="files-page"></span><button id="files-next" type="button">Далее →</button></nav>
+</section>
+</div>
+<details id="orders-panel"><summary>Заказы и возвраты</summary><section><h2>Последние 100 заказов</h2><button id="load-orders" type="button">Обновить заказы</button><div id="orders"></div></section></details>
+<details><summary>Поддержка и загрузка файлов</summary><section><p>Вопросы студентов приходят в ваш личный чат с ботом. Нажмите «Ответить» на вопрос и отправьте текст — бот передаст его студенту.</p><p>Для подключения закрытой группы добавьте бота администратором и отправьте в ней /bind_storage от своего аккаунта. Темы и метки файлов помогают хранить документы в порядке; структуру каталога вы создаёте здесь.</p></section></details>
 </div></main></body></html>
